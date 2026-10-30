@@ -112,3 +112,20 @@ test('partial effect delivery persists receipt and resumes with the original pay
 test('advertised independent-effect support must be confirmed by the response',()=>fixture(async({core,life,now})=>{
  life.capabilities={independentEffects:1};const row={id:'inner:unsupported',sourceId:'session-main',expiresAt:now()+60000,memory:{text:'票根',quote:'票根',importance:90},effects:{}};await core.applyEffects(row);assert.notEqual(row.effects.applied,true);assert.match(row.effects.error,/协议/);
 }));
+
+test('Gemini per-item decisions preserve uncertainty without postponing unrelated new events',()=>fixture(async({core,life,rows,now,advance,options})=>{
+ rows.push({sequence:2,id:'life:2',at:now(),kind:'event-stage',data:{eventId:'desk',stageText:'整理桌面'}});
+ life.judge=async(_p,_s,input)=>input.candidate?audit:{...attention,decision:'uncertain',observationDecisions:[{id:'life:1',decision:'uncertain',reason:'还没想清楚',revisitMinutes:180},{id:'life:2',decision:'record',reason:'只是日常收拾',revisitMinutes:1}]};
+ await core.tick({force:true});assert.equal(core.record.queue.find(x=>x.id==='life:1').revisitAt,now()+180*60000);assert.equal(core.record.queue.find(x=>x.id==='life:2').state,'recorded');
+ advance(21*60000);rows.push({sequence:3,id:'life:3',at:now(),kind:'event-stage',data:{eventId:'call',stageText:'家里来电话'}});core.ingest();advance(3*60000);assert.equal(core.due(),true);
+ let offered;life.judge=async(_p,_s,input)=>{offered=input.observations;return {...attention,decision:'record',observationDecisions:[{id:'life:3',decision:'record',reason:'已经知道了',revisitMinutes:1}]};};
+ await core.tick();assert.deepEqual(offered.map(x=>x.id),['life:3']);const resumed=new InnerLife(options);assert.equal(resumed.record.queue.find(x=>x.id==='life:1').attention.decision,'uncertain');assert.equal(resumed.view().attentionItems.length,1);
+}));
+test('per-item focus controls reflection while omitted observations remain pending',()=>fixture(async({core,life,rows,now})=>{
+ rows.push({sequence:2,id:'life:2',at:now(),kind:'event-stage',data:{}});
+ life.judge=async(_p,_s,input)=>input.candidate?audit:{...attention,focusIds:['life:2'],observationDecisions:[{id:'life:1',decision:'attend',reason:'想一想票根',revisitMinutes:1}]};
+ await core.tick({force:true});assert.deepEqual(core.record.entries[0].evidenceIds,['life:1']);assert.equal(core.record.queue.find(x=>x.id==='life:2').state,'pending');
+}));
+test('invalid attention IDs cannot discard observations',()=>fixture(async({core,life})=>{
+ life.judge=async()=>({...attention,decision:'record',observationDecisions:[{id:'foreign',decision:'record',reason:'忽略',revisitMinutes:1}]});await core.tick({force:true});assert.equal(core.record.queue[0].state,'pending');assert.match(core.record.error,/逐项注意/);
+}));
