@@ -102,5 +102,5 @@ for(const {file,source} of plans)if(file.replaceAll('\\','/').includes('/dsh-fei
 // Validate all adapters before mutating any installed plugin.
 for(const {file,source} of plans){const check=file+'.isolation-check.mjs';try{fs.writeFileSync(check,source);execFileSync(process.execPath,['--check',check],{stdio:'pipe'});}finally{if(fs.existsSync(check))fs.unlinkSync(check);}}
 for(const {file,source} of plans){if(!fs.existsSync(file+'.before-inner-isolation.bak'))fs.copyFileSync(file,file+'.before-inner-isolation.bak');fs.writeFileSync(file,source);}
-const target=path.join(home,'censhu-inner-life');fs.mkdirSync(target,{recursive:true});fs.writeFileSync(path.join(target,'isolation-adapters.json'),JSON.stringify(manifest,null,2));for(const {file,source} of plans)if(file.replaceAll('\\','/').includes('/dsh-feiyu-mood/'))synchronizeMoodAdapters(home,file,source);
+const target=path.join(home,'censhu-inner-life');fs.mkdirSync(target,{recursive:true});fs.writeFileSync(path.join(target,'isolation-adapters.json'),JSON.stringify(manifest,null,2));for(const {file,source} of plans)if(file.replaceAll('\\','/').includes('/dsh-feiyu-mood/')){const coordinated=synchronizeMoodAdapters(home,file,source);for(const item of coordinated.skipped)console.warn('未更新对方登记：'+item.reason+'；本次隔离安装继续完成');}
 console.log('独处隔离适配完成：'+plans.length+' 个已安装插件。');
