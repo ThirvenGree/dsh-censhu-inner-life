@@ -100,3 +100,15 @@ test('only audited intention IDs are enriched with their snapshot versions and s
 test('unapproved or nonexistent intentions do not discard the rest of a valid diary',()=>fixture(async({core,life,now,effects})=>{
  life.snapshot=()=>({context:'',memories:[],lifeIntentions:[{id:'intention:books',generatedAt:now(),revision:0}]});core.reflect=async()=>({...diary,intentionChanges:[{id:'intention:unknown',action:'cancel',priority:0,reason:'想改变'}]});life.judge=async(_p,_s,input)=>input.candidate?{...audit,approvedIntentionIds:['intention:unknown']}:attention;await core.tick({force:true});assert.equal(core.record.entries.length,1);assert.equal(core.record.entries[0].intentionChanges.length,0);assert.equal(core.record.entries[0].intentionChangeErrors.length,1);assert.equal(effects(),0);
 }));
+
+test('partial effect delivery persists receipt and resumes with the original payload after restart',()=>fixture(async({core,life,options,now})=>{
+ life.capabilities={independentEffects:1};let first=true,requests=[];
+ life.submitInnerResult=request=>{requests.push(structuredClone(request));return first?{effectsProtocol:1,complete:false,memory:'retry',mood:'queued',channels:{memory:{done:false,state:'retry',error:'offline'},mood:{done:true,state:'completed'}}}:{effectsProtocol:1,complete:true,memory:'queued',mood:'queued',channels:{memory:{done:true,state:'completed'},mood:{done:true,state:'completed'}}};};
+ const row={id:'inner:retry-test',sourceId:'session-main',expiresAt:now()+60000,memory:{text:'留下票根',quote:'票根',importance:90},effects:{}};core.record.entries.push(row);
+ await core.applyEffects(row);assert.equal(row.effects.applied,undefined);assert.match(row.effects.error,/offline/);assert.equal(row.effects.result.mood,'queued');
+ first=false;const resumed=new InnerLife(options),saved=resumed.record.entries[0];await resumed.applyEffects(saved);assert.equal(saved.effects.applied,true);assert.deepEqual(requests[0],requests[1]);assert.equal(requests[1].expiresAt,row.expiresAt);assert.equal(saved.effects.retryAt,undefined);
+}));
+
+test('advertised independent-effect support must be confirmed by the response',()=>fixture(async({core,life,now})=>{
+ life.capabilities={independentEffects:1};const row={id:'inner:unsupported',sourceId:'session-main',expiresAt:now()+60000,memory:{text:'票根',quote:'票根',importance:90},effects:{}};await core.applyEffects(row);assert.notEqual(row.effects.applied,true);assert.match(row.effects.error,/协议/);
+}));
