@@ -1,6 +1,6 @@
 {
   "name": "dsh-censhu-inner-life",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "type": "module",
   "description": "岑舒独处时的经历感知、感受、反思与后续打算；跨会话联动生活、心情和既有记忆",
   "license": "MIT",
@@ -21,7 +21,7 @@
     "scripts"
   ],
   "scripts": {
-    "check": "node --check lib/core.js && node --check lib/host.js && node --check lib/dsh-worker.js && node --check lib/prompts.js && node --check lib/reflections.js && node --check client.js && node --check lib/isolation.js && node --check lib/isolation-health.js && node --check scripts/install-isolation.mjs && node --check scripts/install.mjs && node --check lib/attention-plan.js && node --check lib/deliberation.js",
+    "check": "node --check lib/core.js && node --check lib/host.js && node --check lib/dsh-worker.js && node --check lib/prompts.js && node --check lib/reflections.js && node --check client.js && node --check lib/isolation.js && node --check lib/isolation-health.js && node --check scripts/install-isolation.mjs && node --check scripts/install.mjs && node --check lib/attention-plan.js && node --check lib/deliberation.js && node --check lib/personal-growth.js",
     "test": "node --test"
   },
   "dsh": {
