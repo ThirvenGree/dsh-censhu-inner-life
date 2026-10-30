@@ -6,6 +6,13 @@ test('native session is reused when DSH omits an unchanged request header on lat
  const controller={async create(){created++;return {sessionId:worker.id};},async resolveAgent(){return {agent:worker};}};
  const ctx={agents:{roots:()=>[source,worker]},get:name=>name==='sessionController'?controller:undefined,on:(_name,fn)=>{listeners.add(fn);return ()=>listeners.delete(fn);}};
  const core={dir:'test',record:{},now:()=>123,save(){}};const adapter=new DshWorker(ctx,core);
- for(let i=0;i<2;i++)assert.equal((await adapter.run({runId:'test:'+i,sourceId:'session-main',input:{},previous:[]})).feeling,'平常');
+ for(let i=0;i<2;i++)assert.equal((await adapter.run({runId:'test:resume',sourceId:'session-main',input:{},previous:[]})).feeling,'平常');
  assert.equal(created,1);assert.equal(core.record.worker.turns,2);assert.equal(listeners.size,0);assert.equal(scoped.size,0);
+ await adapter.run({runId:'test:new-batch',sourceId:'session-main',input:{},previous:[]});assert.equal(created,2);assert.equal(core.record.worker.runId,'test:new-batch');
+});
+test('only older plugin-owned idle sessions are archived, never the primary or current session',async()=>{
+ const archived=[],main={id:'session-main',status:'idle'},current={id:'session-current',status:'idle'};
+ const ctx={agents:{roots:()=>[main,current,{id:'session-old',status:'idle'}]},get:name=>name==='workspaceRegistry'?{archiveSession:async id=>archived.push(id)}:undefined};
+ const core={record:{worker:{sessionId:current.id},workers:[{sessionId:main.id},{sessionId:'session-old'},{sessionId:'session-recent1'},{sessionId:'session-recent2'}]},statusSnapshot:{sessionIds:[main.id]},now:()=>10,save(){}};
+ const adapter=new DshWorker(ctx,core);await adapter.archiveOld(main.id);assert.deepEqual(archived,['session-old']);assert.equal(core.record.workers[1].archivedAt,10);
 });

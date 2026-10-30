@@ -23,3 +23,31 @@ test('memory requires exact independent evidence and successful audit',()=>fixtu
 test('invalid reflection is not committed, while sources remain available',()=>fixture(async({core,options})=>{core.reflect=async()=>({...diary,validMinutes:-1});await core.tick({force:true});assert.equal(core.record.entries.length,0);assert.equal(core.record.queue[0].state,'pending');assert.match(core.record.error,/有效期/);}));
 test('manual settings, expiry and malformed JSON are validated',()=>{assert.throws(()=>validateConfig({minimumMinutes:0}));assert.throws(()=>validateReflection({...diary,shareDecision:'always'}));assert.deepEqual(parseDiary('```json\n{"a":1}\n```'),{a:1});assert.throws(()=>parseDiary('not json'));});
 test('modifying routes reject DNS rebinding hosts, foreign origins and missing CSRF tokens',()=>{const req={method:'POST',headers:{host:'127.0.0.1:1234','x-inner-life-csrf':'a'.repeat(64)},socket:{localPort:1234,remoteAddress:'127.0.0.1'}};assert.doesNotThrow(()=>guard(req,'a'.repeat(64)));assert.throws(()=>guard({...req,headers:{...req.headers,host:'attacker.example:1234'}},'a'.repeat(64)));assert.throws(()=>guard({...req,headers:{...req.headers,origin:'https://evil.example'}},'a'.repeat(64)));assert.throws(()=>guard({...req,headers:{host:'127.0.0.1:1234'}},'a'.repeat(64)));});
+test('audit failure resumes only audit after restart, even when daily reflection quota is exhausted',()=>fixture(async({core,life,options,advance,reflections})=>{
+ let attentionCalls=0,auditCalls=0;life.judge=async(_p,_s,input)=>{if(!input.candidate){attentionCalls++;return attention;}auditCalls++;if(auditCalls===1)throw Error('network');return audit;};
+ await core.tick({force:true});assert.equal(core.record.attempt.phase,'audit');const runId=core.record.attempt.id;assert.equal(core.record.entries.length,0);
+ core.configure({maxReflectionsDaily:1});core.record.attempt.signature=JSON.stringify(core.config);core.save();advance(20*60000);const resumed=new InnerLife(options);await resumed.tick();
+ assert.equal(attentionCalls,1);assert.equal(reflections(),1);assert.equal(auditCalls,2);assert.equal(resumed.record.entries[0].id,runId);assert.equal(resumed.count().judgments,1);assert.equal(resumed.count().reflections,1);
+}));
+test('model focus acknowledges selected observations while unrelated items remain pending',()=>fixture(async({core,life,rows,now})=>{
+ rows.push({sequence:2,id:'life:2',at:now(),kind:'conversation',data:{text:'另一件事'}});life.judge=async(_p,_s,input)=>input.candidate?audit:{...attention,focusIds:['life:1'],recallIds:[]};await core.tick({force:true});
+ assert.equal(core.record.queue.find(x=>x.id==='life:1').state,'done');assert.equal(core.record.queue.find(x=>x.id==='life:2').state,'pending');assert.deepEqual(core.record.entries[0].evidenceIds,['life:1']);
+}));
+test('the model can recall an older important diary and explicitly replace its temporary state',()=>fixture(async({core,life,now})=>{
+ const old={id:'inner:old',...diary,at:now()-86400000,expiresAt:now()+3600000,importance:95,shareState:'pending',effects:{applied:true}};core.record.entries.push(old);
+ for(let i=0;i<9;i++)core.record.entries.push({...old,id:'inner:recent'+i,at:now()-9000+i,importance:5,shareState:'private'});
+ life.judge=async(_p,_s,input)=>{if(input.candidate)return {...audit,importance:85};assert.ok(input.reflectionCatalog.some(x=>x.id===old.id));return {...attention,focusIds:['life:1'],recallIds:[old.id]};};
+ core.reflect=async({previous})=>{assert.equal(previous[0].id,old.id);return {...diary,feeling:'已经放下那件事',supersedesIds:[old.id]};};await core.tick({force:true});
+ assert.equal(old.shareState,'superseded');assert.equal(old.supersededBy,core.record.entries.at(-1).id);assert.equal(core.record.entries.length,11);assert.deepEqual(core.record.entries.at(-1).recallIds,[old.id]);assert.ok(!core.context({sessionId:'main'}).ids.includes(old.id));
+}));
+test('an empty private reflection is acknowledged silently without audit or blank diary',()=>fixture(async({core,calls})=>{
+ core.reflect=async()=>({...diary,feeling:'',reflection:'',intention:'',behaviorHint:'',memoryCandidate:''});await core.tick({force:true});assert.equal(calls(),1);assert.equal(core.record.entries.length,0);assert.equal(core.record.queue[0].quiet,true);assert.ok(core.record.lastQuiet);assert.equal(core.record.attempt,undefined);
+}));
+test('unknown recall IDs fail without acknowledging observations',()=>fixture(async({core,life})=>{life.judge=async()=>({...attention,focusIds:['missing'],recallIds:[]});await core.tick({force:true});assert.equal(core.record.queue[0].state,'pending');assert.equal(core.record.entries.length,0);assert.match(core.record.error,/编号无效/);}));
+test('busy source queues the reflection without spending a reflection quota or rerunning attention',()=>fixture(async({core,advance,calls})=>{
+ core.reflect=async()=>{throw Object.assign(Error('busy'),{code:'INNER_BUSY'});};await core.tick({force:true});assert.equal(core.count().reflections,0);assert.equal(core.count().judgments,1);assert.equal(core.record.failures||0,0);assert.equal(core.record.attempt.phase,'reflect');
+ core.reflect=async()=>diary;advance(31000);await core.tick();assert.equal(core.count().judgments,1);assert.equal(core.count().reflections,1);assert.equal(calls(),2);assert.equal(core.record.entries.length,1);
+}));
+test('late audit preserves the original diary time without reviving expired mood or sharing',()=>fixture(async({core,life,advance,now})=>{
+ let audits=0;core.reflect=async()=>({...diary,validMinutes:1,shareDecision:'offer'});life.judge=async(_p,_s,input)=>{if(!input.candidate)return attention;if(++audits===1)throw Error('network');return {...audit,newFeeling:true,moodDelta:2};};const generatedAt=now();await core.tick({force:true});advance(20*60000);await core.tick();const entry=core.record.entries[0];assert.equal(entry.at,generatedAt);assert.equal(entry.shareState,'expired');assert.equal(entry.mood,undefined);assert.equal(core.context({sessionId:'main'}).context,'');
+}));
