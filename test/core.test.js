@@ -74,14 +74,22 @@ test('drawing sharing remains owned by drawing plugin even after reflection offe
  rows[0].data.templateId='drawing-inspiration';core.reflect=async()=>({...diary,shareDecision:'offer'});await core.tick({force:true});assert.equal(core.record.entries[0].shareState,'private');
 }));
 test('original event is scored at most once and daily absolute budget applies',()=>fixture(async({core,life,rows,advance,now})=>{
- rows[0].data.moodAccounted=false;life.judge=async(_p,_s,input)=>input.candidate?{...audit,newFeeling:true,moodDelta:3,dims:{happy:6,calm:0,sad:0}}:attention;
+ rows[0].data.moodAdmission='admitted';life.judge=async(_p,_s,input)=>input.candidate?{...audit,newFeeling:true,reflectionEvidence:diary.reflection,distinctReason:'看见票根后的反思带来珍惜，与原本烦闷不同',moodDelta:3,dims:{happy:6,calm:0,sad:0}}:attention;
  await core.tick({force:true});assert.equal(core.record.entries[0].mood.eventId,'book');
- for(const [i,eventId] of ['book','new-book','third-book'].entries()){advance(30*60000);rows.push({sequence:i+2,id:'life:'+(i+2),kind:'event-stage',at:now(),data:{eventId,name:eventId,moodAccounted:false}});await core.tick({force:true});}
+ for(const [i,eventId] of ['book','new-book','third-book'].entries()){advance(30*60000);rows.push({sequence:i+2,id:'life:'+(i+2),kind:'event-stage',at:now(),data:{eventId,name:eventId,moodAdmission:'admitted'}});await core.tick({force:true});}
  assert.equal(core.record.entries.filter(x=>x.mood).length,2);assert.equal(core.count().moodUsed,6);assert.equal(core.count().dimsUsed.happy,12);
 }));
-test('already queued ordinary event and unknown accounting never receive reflection points',()=>fixture(async({core,life,rows})=>{
+test('already queued ordinary event cannot score without independent reflection evidence',()=>fixture(async({core,life,rows})=>{
  rows[0].data.moodAccounted=true;life.judge=async(_p,_s,input)=>input.candidate?{...audit,newFeeling:true,moodDelta:3}:attention;await core.tick({force:true});assert.equal(core.record.entries[0].mood,undefined);
 }));
 test('own mood receipts and chat-time mood changes are absorbed into baseline without reenqueuing',()=>fixture(async({core,life,rows,now,advance})=>{
  rows.length=0;const status=life.status();let mood=70;life.status=()=>({...status,mood:{ok:true,mood,dims:{happy:0},updatedAt:now(),lastLifeInfluence:{at:now(),ids:['inner:test:reflection']}}});core.ingest();advance(1000);mood=73;core.ingest();assert.equal(core.record.queue.length,0);assert.equal(core.record.moodBaseline.mood,73);
+}));
+
+test('quota-rejected events cannot acquire points through reflection even with a positive audit',()=>fixture(async({core,life,rows})=>{
+ rows[0].data.moodAdmission='daily-limit';life.judge=async(_p,_s,input)=>input.candidate?{...audit,newFeeling:true,eventId:'book',reflectionEvidence:diary.reflection,distinctReason:'新认识',moodDelta:2}:attention;await core.tick({force:true});assert.equal(core.record.entries[0].mood,undefined);
+}));
+test('latest admission and receipts override stale observation flags before audit',()=>fixture(async({core,life,rows})=>{
+ rows[0].data.moodAccounted=true;const status=life.status();life.status=()=>({...status,moodAccounting:{book:{moodAdmission:'admitted',moodReceipts:[{id:'book:start:0',applied:true}]}}});
+ life.judge=async(_p,_s,input)=>{if(!input.candidate)return attention;assert.equal(input.observations[0].data.moodReceipts[0].applied,true);return {...audit,newFeeling:true,eventId:'book',reflectionEvidence:diary.reflection,distinctReason:'由反思产生，与原有反应不同',moodDelta:1};};await core.tick({force:true});assert.equal(core.record.entries[0].mood.moodDelta,1);
 }));
