@@ -1,0 +1,9 @@
+{
+  "name":"dsh-censhu-inner-life","version":"0.1.0","type":"module",
+  "description":"岑舒独处时的经历感知、感受、反思与后续打算；跨会话联动生活、心情和既有记忆",
+  "license":"MIT","main":"lib/host.js",
+  "exports":{".":"./lib/host.js","./client":"./client.js","./cordis.patch.yml":"./cordis.patch.yml"},
+  "files":["lib","client.js","settings.html","cordis.patch.yml","README.md","LICENSE","docs","scripts"],
+  "scripts":{"check":"node --check lib/core.js && node --check lib/host.js && node --check lib/dsh-worker.js && node --check lib/prompts.js && node --check client.js","test":"node --test"},
+  "dsh":{"bundle":{"patch":"./cordis.patch.yml"},"client":{"platform":"web","inject":["slots"],"external":["react"]}}
+}
