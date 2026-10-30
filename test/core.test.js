@@ -26,11 +26,11 @@ test('modifying routes reject DNS rebinding hosts, foreign origins and missing C
 test('audit failure resumes only audit after restart, even when daily reflection quota is exhausted',()=>fixture(async({core,life,options,advance,reflections})=>{
  let attentionCalls=0,auditCalls=0;life.judge=async(_p,_s,input)=>{if(!input.candidate){attentionCalls++;return attention;}auditCalls++;if(auditCalls===1)throw Error('network');return audit;};
  await core.tick({force:true});assert.equal(core.record.attempt.phase,'audit');const runId=core.record.attempt.id;assert.equal(core.record.entries.length,0);
- core.configure({maxReflectionsDaily:1});core.record.attempt.signature=JSON.stringify(core.config);core.save();advance(20*60000);const resumed=new InnerLife(options);await resumed.tick();
+ core.configure({maxReflectionsDaily:1});core.record.attempt.signature=core.signature();core.save();advance(20*60000);const resumed=new InnerLife(options);await resumed.tick();
  assert.equal(attentionCalls,1);assert.equal(reflections(),1);assert.equal(auditCalls,2);assert.equal(resumed.record.entries[0].id,runId);assert.equal(resumed.count().judgments,1);assert.equal(resumed.count().reflections,1);
 }));
 test('model focus acknowledges selected observations while unrelated items remain pending',()=>fixture(async({core,life,rows,now})=>{
- rows.push({sequence:2,id:'life:2',at:now(),kind:'conversation',data:{text:'另一件事'}});life.judge=async(_p,_s,input)=>input.candidate?audit:{...attention,focusIds:['life:1'],recallIds:[]};await core.tick({force:true});
+ rows.push({sequence:2,id:'life:2',at:now(),kind:'event-stage',data:{text:'另一件事'}});life.judge=async(_p,_s,input)=>input.candidate?audit:{...attention,focusIds:['life:1'],recallIds:[]};await core.tick({force:true});
  assert.equal(core.record.queue.find(x=>x.id==='life:1').state,'done');assert.equal(core.record.queue.find(x=>x.id==='life:2').state,'pending');assert.deepEqual(core.record.entries[0].evidenceIds,['life:1']);
 }));
 test('the model can recall an older important diary and explicitly replace its temporary state',()=>fixture(async({core,life,now})=>{
@@ -50,4 +50,38 @@ test('busy source queues the reflection without spending a reflection quota or r
 }));
 test('late audit preserves the original diary time without reviving expired mood or sharing',()=>fixture(async({core,life,advance,now})=>{
  let audits=0;core.reflect=async()=>({...diary,validMinutes:1,shareDecision:'offer'});life.judge=async(_p,_s,input)=>{if(!input.candidate)return attention;if(++audits===1)throw Error('network');return {...audit,newFeeling:true,moodDelta:2};};const generatedAt=now();await core.tick({force:true});advance(20*60000);await core.tick();const entry=core.record.entries[0];assert.equal(entry.at,generatedAt);assert.equal(entry.shareState,'expired');assert.equal(entry.mood,undefined);assert.equal(core.context({sessionId:'main'}).context,'');
+}));
+
+
+test('active real chat defers both fresh work and checkpoint retry; newest bound surface chooses the session',()=>fixture(async({core,life,now,advance,calls})=>{
+ const status=life.status();life.status=()=>({...status,sessionIds:['session-main','session-other'],activity:{sessionId:'session-other',surface:'dsh',at:now()-1000}});
+ await core.tick({force:true});assert.equal(calls(),0);assert.equal(core.sourceId(),'session-other');
+ const at=now();life.status=()=>({...status,activity:{at}});advance(11*60000);await core.tick({force:true});assert.equal(core.record.entries.length,1);
+}));
+test('expired observations leave the pending queue, including legacy per-message chat records',()=>fixture(async({core,rows,advance})=>{
+ rows.push({...rows[0],id:'chat',sequence:2,kind:'conversation'});core.ingest();assert.equal(core.record.queue.length,1);
+ advance(49*3600000);core.ingest();assert.equal(core.record.queue.filter(x=>x.state==='pending').length,0);
+}));
+test('runtime limits preserve an audit checkpoint without calling reflection again',()=>fixture(async({core,life,advance,reflections})=>{
+ let failed=false;life.judge=async(_p,_s,input)=>{if(input.candidate&&!failed){failed=true;throw Error('network');}return input.candidate?audit:attention;};
+ await core.tick({force:true});const id=core.record.attempt.id;core.configure({queueLimit:700,minimumMinutes:30});advance(20*60000);await core.tick({force:true});assert.equal(reflections(),1);assert.equal(core.record.entries[0].id,id);
+}));
+test('prior diary and recalled private memory cannot become evidence of a new memory',()=>fixture(async({core,life})=>{
+ life.snapshot=()=>({context:'',memories:[{text:'岑舒过去独处想到了海边'}]});life.judge=async(_p,_s,input)=>input.candidate?{...audit,remember:true,memoryText:'岑舒看见海边',evidence:'岑舒过去独处想到了海边',importance:90}:attention;
+ await core.tick({force:true});assert.equal(core.record.entries[0].memory,undefined);
+}));
+test('drawing sharing remains owned by drawing plugin even after reflection offers to share',()=>fixture(async({core,life,rows})=>{
+ rows[0].data.templateId='drawing-inspiration';core.reflect=async()=>({...diary,shareDecision:'offer'});await core.tick({force:true});assert.equal(core.record.entries[0].shareState,'private');
+}));
+test('original event is scored at most once and daily absolute budget applies',()=>fixture(async({core,life,rows,advance,now})=>{
+ rows[0].data.moodAccounted=false;life.judge=async(_p,_s,input)=>input.candidate?{...audit,newFeeling:true,moodDelta:3,dims:{happy:6,calm:0,sad:0}}:attention;
+ await core.tick({force:true});assert.equal(core.record.entries[0].mood.eventId,'book');
+ for(const [i,eventId] of ['book','new-book','third-book'].entries()){advance(30*60000);rows.push({sequence:i+2,id:'life:'+(i+2),kind:'event-stage',at:now(),data:{eventId,name:eventId,moodAccounted:false}});await core.tick({force:true});}
+ assert.equal(core.record.entries.filter(x=>x.mood).length,2);assert.equal(core.count().moodUsed,6);assert.equal(core.count().dimsUsed.happy,12);
+}));
+test('already queued ordinary event and unknown accounting never receive reflection points',()=>fixture(async({core,life,rows})=>{
+ rows[0].data.moodAccounted=true;life.judge=async(_p,_s,input)=>input.candidate?{...audit,newFeeling:true,moodDelta:3}:attention;await core.tick({force:true});assert.equal(core.record.entries[0].mood,undefined);
+}));
+test('own mood receipts and chat-time mood changes are absorbed into baseline without reenqueuing',()=>fixture(async({core,life,rows,now,advance})=>{
+ rows.length=0;const status=life.status();let mood=70;life.status=()=>({...status,mood:{ok:true,mood,dims:{happy:0},updatedAt:now(),lastLifeInfluence:{at:now(),ids:['inner:test:reflection']}}});core.ingest();advance(1000);mood=73;core.ingest();assert.equal(core.record.queue.length,0);assert.equal(core.record.moodBaseline.mood,73);
 }));
