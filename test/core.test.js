@@ -129,3 +129,37 @@ test('per-item focus controls reflection while omitted observations remain pendi
 test('invalid attention IDs cannot discard observations',()=>fixture(async({core,life})=>{
  life.judge=async()=>({...attention,decision:'record',observationDecisions:[{id:'foreign',decision:'record',reason:'忽略',revisitMinutes:1}]});await core.tick({force:true});assert.equal(core.record.queue[0].state,'pending');assert.match(core.record.error,/逐项注意/);
 }));
+
+test('expired and unknown replacement references do not discard an otherwise valid diary',()=>fixture(async({core,life,now})=>{
+ const old={id:'inner:expired',...diary,at:now()-86400000,expiresAt:now()-1000,effects:{applied:true}};core.record.entries.push(old);
+ life.judge=async(_p,_s,input)=>{if(!input.candidate)return {...attention,recallIds:[old.id]};assert.deepEqual(input.candidate.supersedesIds,[]);return audit;};
+ core.reflect=async()=>({...diary,supersedesIds:[old.id,'inner:unknown']});await core.tick({force:true});
+ assert.equal(core.record.error,'');assert.equal(core.record.entries.length,2);assert.equal(old.supersededAt,undefined);assert.equal(core.record.entries[1].supersedesErrors.length,2);assert.ok(core.record.entries[1].reviewedAt);
+}));
+test('schedule view shows quota pause without changing persisted plans and recovers across days',()=>fixture(async({core,advance,now,calls})=>{
+ core.record.nextAt=now()-60000;core.count().reflections=core.config.maxReflectionsDaily;
+ const before=JSON.stringify(core.record);const s=core.view().schedule;
+ assert.equal(s.state,'reflection-limit');assert.equal(s.nextAt,null);assert.equal(s.plannedAt,now()-60000);assert.equal(JSON.stringify(core.record),before);assert.equal(core.due(),false);assert.equal(calls(),0);
+ advance(24*3600000);assert.equal(core.view().schedule.state,'due');assert.equal(core.due(),true);
+}));
+test('schedule distinguishes future plan, retry, and unfinished review from daily quota',()=>fixture(async({core,now})=>{
+ assert.equal(core.view().schedule.state,'scheduled');assert.ok(core.view().schedule.nextAt>now());
+ core.count().reflections=core.config.maxReflectionsDaily;core.record.attempt={phase:'audit'};assert.equal(core.view().schedule.state,'resume');
+ core.record.retryAt=now()+60000;assert.equal(core.view().schedule.state,'retry');assert.equal(core.view().schedule.nextAt,core.record.retryAt);
+}));
+
+test('Gemini can choose recollection without new events and pass selected old diaries to the worker',()=>fixture(async({core,life,rows,now,effects})=>{
+ rows.length=0;
+ core.record.entries.push({id:'old-recall',at:now()-86400000,expiresAt:now()-1000,reviewedAt:now()-86400000,feeling:'那天的旧书',reflection:'曾在书中留下一张票根',intention:'',shareState:'private'});
+ life.judge=async(_p,_s,input)=>input.candidate?audit:{...attention,activity:'recall',recallTopic:'想翻翻旧书里的票根',focusIds:[],recallIds:['old-recall'],observationDecisions:[]};
+ core.reflect=async({input,previous})=>{assert.equal(input.recollectionPlan.activity,'recall');assert.equal(input.recollectionPlan.topic,'想翻翻旧书里的票根');assert.equal(input.observations.length,0);assert.equal(previous[0].id,'old-recall');assert.equal(previous[0].active,false);return {...diary,action:'recall',intention:'以后再看看那张票根'};};
+ await core.tick({force:true});const row=core.record.entries.at(-1);assert.equal(row.action,'recall');assert.equal(row.recollectionPlan.activity,'recall');assert.deepEqual(row.recallIds,['old-recall']);assert.equal(effects(),0);assert.equal(core.record.deliveries.length,0);
+}));
+
+test('malformed recollection choices do not start reflection or acknowledge new observations',()=>fixture(async({core,life,reflections})=>{life.judge=async()=>({...attention,activity:'invented',recallTopic:''});await core.tick({force:true});assert.equal(reflections(),0);assert.equal(core.record.queue[0].state,'pending');assert.match(core.record.error,/回忆选择格式无效/);}));
+
+test('question research feeds retrieved sources into the actual reflection request',()=>fixture(async({core,life})=>{
+ const original=life.judge;life.personalitySources=async()=>({memories:[{id:'real',text:'青枔提起旧书'}]});let researchCalls=0,seen;
+ life.judge=async(p,s,input,options)=>{if(options?.feature==='inner-question-recall'){researchCalls++;return {decision:'proceed',reason:'回应当前疑问',selectedIds:input.candidates.map(x=>x.id).slice(0,8)};}if(!input.candidate)return {...attention,questions:['这本书对我有什么意义？']};return audit;};
+ core.reflect=async request=>{seen=request.input;return diary;};await core.tick({force:true});assert.equal(researchCalls,1);assert.equal(seen.recalledSources[0].id,'memory:real');assert.deepEqual(seen.questions,['这本书对我有什么意义？']);assert.equal(core.record.entries.length,1);assert.equal(core.questionRecall.record.diaries.length,1);
+}));

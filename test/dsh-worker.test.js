@@ -3,18 +3,18 @@ const originalHome=process.env.DSH_HOME,testHome=fs.mkdtempSync(path.join(os.tmp
 process.on('exit',()=>{if(originalHome)process.env.DSH_HOME=originalHome;else delete process.env.DSH_HOME;fs.rmSync(testHome,{recursive:true,force:true});});
 import test from 'node:test';import assert from 'node:assert/strict';import {isPrivateSession} from '../lib/isolation.js';
 import {DshWorker} from '../lib/dsh-worker.js';
-test('native session is reused when DSH omits an unchanged request header on later turns',async()=>{
+for(const autonomousTools of [false,true])test('native session reuse and tool policy '+autonomousTools,async()=>{
  const listeners=new Set(),scoped=new Map();let requests=0,created=0;
  const source={id:'session-main',status:'idle',session:{id:'session-main',meta:{cwd:'test'},requestHeader:()=>({config:{provider:'deepseek-account',model:'deepseek-flash'}})}};
  const worker={id:'session-inner',status:'idle',ctx:{on:(name,fn)=>{scoped.set(name,fn);return ()=>scoped.delete(name);}},followup(){this.status='running';},async whenIdle(){requests++;const request=await scoped.get('agent/request')({},async()=>({provider:'old',model:'old',reasoningEffort:'unsupported'}));assert.equal(request.model,'deepseek-flash');assert.equal(request.reasoningEffort,undefined);const assembly=scoped.get('system-prompt/assemble')({sections:[],contexts:[],tools:[{name:'qq_send_message'}]});assert.equal(assembly.tools.length,1); // DSH may advertise tools regardless of assembly edits.
  for(const name of ['memory_write','write','exec','qq_send_message','mcp__remote__action']) {
    let dispatched=false;
    const gate=await scoped.get('tools/pre-execute')({name,agent:this},async()=>{dispatched=true;return {kind:'allow'};});
-   assert.equal(gate.kind,'deny');assert.equal(dispatched,false);assert.match(gate.reason,/独处会话禁止/);
+   assert.equal(gate.kind,autonomousTools?'allow':'deny');assert.equal(dispatched,autonomousTools);if(!autonomousTools)assert.match(gate.reason,/独处会话禁止/);
  }for(const listener of listeners){if(requests===1)listener({id:this.id},{type:'request/header'});listener({id:this.id},{type:'assistant/message',data:{message:{content:[{type:'text',text:'{"feeling":"平常"}'}]}}});}this.status='idle';}};
  const controller={async create({sessionId}){assert.equal(isPrivateSession(sessionId),true);created++;worker.id=sessionId;return {sessionId};},async resolveAgent(){return {agent:worker};}};
  const ctx={agents:{roots:()=>[source,worker]},get:name=>name==='sessionController'?controller:undefined,on:(_name,fn)=>{listeners.add(fn);return ()=>listeners.delete(fn);}};
- const core={dir:'test',record:{},now:()=>123,save(){}};const adapter=new DshWorker(ctx,core);
+ const core={config:{enabled:true,autonomousTools},dir:'test',record:{},now:()=>123,save(){}};const adapter=new DshWorker(ctx,core);
  for(let i=0;i<2;i++)assert.equal((await adapter.run({runId:'test:resume',sourceId:'session-main',input:{},previous:[]})).feeling,'平常');
  assert.equal(created,1);assert.equal(core.record.worker.turns,2);assert.equal(listeners.size,0);assert.equal(scoped.size,0);
  await adapter.run({runId:'test:new-batch',sourceId:'session-main',input:{},previous:[]});assert.equal(created,2);assert.equal(core.record.worker.runId,'test:new-batch');
@@ -42,4 +42,12 @@ test('an existing or unverified returned session is never archived or muted and 
 });
 test('missing archive support preserves the failed session for repair but prevents another creation',async()=>{
  let creates=0;const main={id:'session-main',status:'idle',session:{id:'session-main'}},agents=[main];const ctx={agents:{roots:()=>agents},get:name=>name==='sessionController'?{create:async()=>{creates++;agents.push({id:'session-orphan',status:'idle',session:{id:'session-orphan',header:{cwd:testHome},snapshotEvents:()=>[]}});return {sessionId:'session-orphan'};},resolveAgent(){}}:name==='sessionQuery'?{listSessions:async()=>[{header:{id:main.id}}]}:undefined};const core={dir:testHome,record:{},statusSnapshot:{sessionIds:[main.id]},now:()=>100,save(){}};const worker=new DshWorker(ctx,core);await assert.rejects(()=>worker.resolve(main.id,'first'),{code:'INNER_SESSION_IDENTITY'});assert.equal(core.record.creationFailure.cleanup.state,'archive-unavailable');await assert.rejects(()=>worker.resolve(main.id,'second'),{code:'INNER_SESSION_IDENTITY'});assert.equal(creates,1);assert.equal(core.record.workers[0].sessionId,'session-orphan');
+});
+
+test('native turn errors preserve quota status and provider message',async()=>{
+ const listeners=new Set(),source={id:'session-main',status:'idle',session:{id:'session-main',requestHeader:()=>({config:{provider:'deepseek-account',model:'deepseek-flash'}})}};
+ const agent={id:'session-inner',status:'idle',ctx:{on:()=>()=>{}},followup(){},async whenIdle(){for(const fn of listeners)fn({id:this.id},{type:'turn/end',data:{reason:{kind:'error',error:{message:'Insufficient Balance',status:402,code:'ACCOUNT_QUOTA'}}}});}};
+ const ctx={agents:{roots:()=>[source,agent]},get:n=>n==='sessionController'?{create:async({sessionId})=>{agent.id=sessionId;return{sessionId};},resolveAgent:async()=>({agent})}:undefined,on:(_,fn)=>{listeners.add(fn);return()=>listeners.delete(fn);}};
+ const core={dir:testHome,record:{},now:()=>100,save(){}};
+ await assert.rejects(()=>new DshWorker(ctx,core).run({runId:'quota',sourceId:source.id,input:{},previous:[]}),e=>e.status===402&&e.code==='ACCOUNT_QUOTA'&&/Insufficient Balance/.test(e.message));
 });

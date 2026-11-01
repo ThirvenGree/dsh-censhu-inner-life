@@ -1,6 +1,6 @@
 {
   "name": "dsh-censhu-inner-life",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "type": "module",
   "description": "岑舒独处时的经历感知、感受、反思与后续打算；跨会话联动生活、心情和既有记忆",
   "license": "MIT",
@@ -18,10 +18,12 @@
     "README.md",
     "LICENSE",
     "docs",
-    "scripts"
+    "scripts",
+    "display.html",
+    "overview.html"
   ],
   "scripts": {
-    "check": "node --check lib/core.js && node --check lib/host.js && node --check lib/dsh-worker.js && node --check lib/prompts.js && node --check lib/reflections.js && node --check client.js && node --check lib/isolation.js && node --check lib/isolation-health.js && node --check scripts/install-isolation.mjs && node --check scripts/install.mjs && node --check lib/attention-plan.js && node --check lib/deliberation.js && node --check lib/personal-growth.js && node --check lib/planning-context.js && node --check lib/personality.js && node --check lib/tool-isolation.js",
+    "check": "node --check lib/core.js && node --check lib/host.js && node --check lib/dsh-worker.js && node --check lib/prompts.js && node --check lib/reflections.js && node --check client.js && node --check lib/isolation.js && node --check lib/isolation-health.js && node --check scripts/install-isolation.mjs && node --check scripts/install.mjs && node --check lib/attention-plan.js && node --check lib/deliberation.js && node --check lib/personal-growth.js && node --check lib/planning-context.js && node --check lib/personality.js && node --check lib/tool-isolation.js && node --check lib/thoughts.js && node --check lib/choice-feed.js && node --check lib/private-archive.js && node --check lib/display-session.js && node --check lib/inner-state.js && node --check lib/question-recall.js && node --check lib/thought-routing.js",
     "test": "node --test"
   },
   "dsh": {
