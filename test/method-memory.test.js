@@ -106,6 +106,9 @@ test('同一来源版本仅审核一次，三路筛选后独立核对；按目�
   await assert.rejects(() => m.decide(role, 'old-run', row.id, row.version, 'use', '不可操作', () => false));
   h.state.episode.version = 'edited';
   assert.deepEqual(await m.recall(role, '复查'), []);
+  assert.equal(m.view().approved, 0);
+  assert.equal(m.data.jobs[id].phase, 'source-unavailable');
+  assert.equal(m.data.jobs[id].candidate, undefined);
   assert.equal(h.calls.filter((x) => x.feature === 'inner-method-recall').length, 1);
   await assert.rejects(() => m.decide(role, 'run', row.id, row.version, 'use', '旧来源不能用'));
   h.state.episode = null;

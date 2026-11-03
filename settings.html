@@ -26,7 +26,7 @@ function renderMethods(methods){
  if(!methods)return;
  let panel=$('method-memory-panel');
  if(!panel){panel=node('section','');panel.className='card';panel.id='method-memory-panel';(document.querySelector('main')||document.body).append(panel);}
- const phases={propose:'等待提炼',replay:'等待正反回放',review:'等待独立审核',approved:'已审核',skip:'放下',skipped:'缺少结果',uncertain:'不确定',unconfirmed:'回放未证实'};
+ const phases={propose:'等待提炼',replay:'等待正反回放',review:'等待独立审核',approved:'已审核',skip:'放下',skipped:'缺少结果',uncertain:'不确定',unconfirmed:'回放未证实','source-unavailable':'原证据已失效'};
  panel.replaceChildren(node('h2','从经历中学到的方法'),node('p','Gemini 提炼适用条件、做法与例外。经过正反两种情境的三路回放及 Terra 独立审核后，岑舒可以按眼前的目标回忆，再决定怎么做。'));
  panel.append(node('p','BrowserSkill 回执接口'+(methods.services?.browser?'已连接':'待连接')+' · 三路回放服务'+(methods.services?.replay?'已连接':'待连接')));
  if(!methods.items.length)panel.append(node('p','目前没有符合条件的真实经历。'));
