@@ -6,8 +6,18 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: dsh-censhu-inner-life
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: dsh-censhu-inner-life
+      - uses: actions/checkout@v4
+        with:
+          repository: ThirvenGree/dsh-cen-shu-life
+          ref: caede2af8714191d21cc2d34843625b8a7623c95
+          path: dsh-cen-shu-life
       - uses: actions/setup-node@v4
         with:
           node-version: 22
