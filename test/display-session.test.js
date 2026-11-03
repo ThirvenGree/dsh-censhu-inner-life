@@ -52,3 +52,19 @@ test('live Gemini failure is displayed and propagated without retrying the reque
  try{fs.writeFileSync(path.join(dir,'display-session.json'),JSON.stringify({sessionId:'display'}));const display=new DisplaySession(ctx,dir),error=Object.assign(Error('test timeout'),{httpStatus:503});await assert.rejects(()=>display.runGemini({feature:'inner-core',input:{}},async()=>{calls++;throw error;}),e=>e===error);assert.equal(calls,1);assert.match(chunks.at(-2).block.text,/请求失败/);assert.equal(display.active.size,0);assert.equal(display.pendingRuns,0);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('life turn owns the visible session while nested Gemini executes without waiting on itself',async()=>{
+ const fs=await import('node:fs'),os=await import('node:os'),path=await import('node:path');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'life-turn-'));
+ try{
+  fs.writeFileSync(path.join(dir,'display-session.json'),JSON.stringify({sessionId:'life'}));
+  const d=new DisplaySession({effect:f=>f(),on:()=>()=>{}},dir),events=[];
+  assert.equal(d.claimLifeTurn('qq',()=>{}),null);
+  const release=d.claimLifeTurn('life',type=>events.push(type));assert.ok(release);
+  assert.equal(d.claimLifeTurn('life',()=>{}),null);
+  assert.deepEqual(await d.runGemini({feature:'inner-core'},async()=>({decision:'skip'})),{decision:'skip'});
+  assert.deepEqual(events,['Gemini 开始','Gemini 已返回']);release();
+  const queued=d.enqueue(async()=>{});assert.equal(d.claimLifeTurn('life',()=>{}),null);await queued;
+  assert.ok(d.claimLifeTurn('life',()=>{}));
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
