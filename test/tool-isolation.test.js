@@ -43,3 +43,13 @@ test('unsupported guard fails closed; failed registration releases its prelimina
   assert.throws(()=>installToolIsolation({on:()=>()=>disposed++,tools:{guard(){throw Error('registration failed');}}}),/registration failed/);
   assert.equal(disposed,1);
 });
+
+test('personal turn keeps its agency decisions with general tools off; internal handoffs are not user speech',async()=>{
+ const {isInternalMessage}=await import('../lib/isolation.js');assert.ok(isInternalMessage({source:{kind:'plugin:dsh-censhu-agency'}}));assert.equal(isInternalMessage({source:{kind:'user'}}),false);
+ const prev=process.env.DSH_HOME,h=fs.mkdtempSync(path.join(os.tmpdir(),'agency-guard-'));process.env.DSH_HOME=h;
+ try{registerPrivateSession('life-test');let guard;
+ const ctx={on:()=>()=>{},tools:{guard:fn=>{guard=fn;return ()=>{};}}};
+ const off=installToolIsolation(ctx,()=>false,()=> 'life-test');const agent={session:{id:'life-test'}};
+ assert.equal(guard({agent,name:'censhu_agency_diary'}),undefined);assert.equal(guard({agent,name:'censhu_agency_contact'}),undefined);assert.equal(guard({agent,name:'exec'}),PRIVATE_TOOL_DENIAL);off();
+ }finally{if(prev===undefined)delete process.env.DSH_HOME;else process.env.DSH_HOME=prev;fs.rmSync(h,{recursive:true,force:true});}
+});
