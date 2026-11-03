@@ -14,7 +14,7 @@ for(const autonomousTools of [false,true])test('native session reuse and tool po
  }for(const listener of listeners){if(requests===1)listener({id:this.id},{type:'request/header'});listener({id:this.id},{type:'assistant/message',data:{message:{content:[{type:'text',text:'{"feeling":"平常"}'}]}}});}this.status='idle';}};
  const controller={async create({sessionId}){assert.equal(isPrivateSession(sessionId),true);created++;worker.id=sessionId;return {sessionId};},async resolveAgent(){return {agent:worker};}};
  const ctx={tools:{guard:()=>()=>{}},agents:{roots:()=>[source,worker]},get:name=>name==='sessionController'?controller:undefined,on:(_name,fn)=>{listeners.add(fn);return ()=>listeners.delete(fn);}};
- const core={config:{enabled:true,autonomousTools},dir:path.join(testHome,String(autonomousTools)),record:{},now:()=>123,save(){}};const adapter=new DshWorker(ctx,core);
+ const core={life:{assembleBudget:async(_agent,next,collect)=>collect(await next()),budgetContext:(base,_agent,field,name,parts)=>({...base,[field]:[...base[field],{name,text:parts.map(p=>p.text).join("\n")}]})},config:{enabled:true,autonomousTools},dir:path.join(testHome,String(autonomousTools)),record:{},now:()=>123,save(){}};const adapter=new DshWorker(ctx,core);
  for(let i=0;i<2;i++)assert.equal((await adapter.run({runId:'test:resume',sourceId:'session-main',input:{},previous:[]})).feeling,'平常');
  assert.equal(created,1);assert.equal(core.record.worker.turns,2);assert.equal(listeners.size,0);assert.equal(scoped.size,0);
  await adapter.run({runId:'test:new-batch',sourceId:'session-main',input:{},previous:[]});assert.equal(created,2);assert.equal(core.record.worker.runId,'test:new-batch');
