@@ -72,3 +72,9 @@ test('mid-turn loss of caller access aborts before a second provider call',async
  }}),/revoked/);
  assert.equal(calls.length,1);assert.equal(q.view().last.status,'waiting');
 });
+
+test('native record revision conflicts remain visible when provider excerpt IDs change',async t=>{
+ const origin={provider:'openviking',scope:'user',id:'viking://user/fixture/memories/one.md',versionKind:'native'};
+ const {q}=fixture(t,async query=>query===question?[{...seed,records:[{...origin,version:'old'}]}]:[{...evidence,records:[{...origin,version:'changed'}]}]);
+ await assert.rejects(q.lookup(question,{sessionId:'qq',judge:async()=>picked(['memory:seed'],'insufficient','memory:seed',cue)}),/原记录版本已变化/);
+});
