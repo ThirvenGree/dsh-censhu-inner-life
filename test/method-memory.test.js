@@ -243,3 +243,83 @@ test('模型执行失败会退避并从回放续跑，不会误报反例未通�
   );
   assert.equal(h.model.view().approved, 1);
 });
+for (const outcome of ['resolve', 'reject']) {
+  test('独立审核返回后卸载，旧证据读取 ' + outcome + ' 不得批准、退避或覆盖重载后的审核', async () => {
+    const h = setup(), entered = Promise.withResolvers(), read = Promise.withResolvers();
+    const browser = h.dependencies.browser(), write = h.core.write;
+    let paused = false, staleWrites = 0;
+    h.dependencies.browser = () => ({
+      ...browser,
+      async read(parent, child) {
+        if (!paused && h.calls.some((c) => c.feature === 'inner-method-review')) {
+          paused = true;
+          entered.resolve();
+          return read.promise;
+        }
+        return browser.read(parent, child);
+      },
+    });
+    h.core.write = (name, value) => {
+      if (h.core.disposed) staleWrites++;
+      write(name, value);
+    };
+
+    const oldTick = h.model.tick();
+    await entered.promise;
+    const checkpoint = structuredClone(h.model.data.jobs[id]);
+    assert.equal(checkpoint.phase, 'review');
+    h.core.disposed = true;
+    h.state.review = 'skip';
+    const replacement = new MethodMemory({ ...h.core, disposed: false, write }, h.dependencies);
+    await replacement.tick();
+    const saved = h.files.get('method-memory.json');
+    assert.equal(saved.jobs[id].phase, 'skip');
+
+    if (outcome === 'resolve') read.resolve(h.state.episode);
+    else read.reject(Error('HTTP 402 simulated late browser failure'));
+    await oldTick;
+    assert.equal(staleWrites, 0);
+    assert.deepEqual(h.model.data.jobs[id], checkpoint);
+    assert.equal(h.model.data.providerRetryAt, undefined);
+    assert.deepEqual(h.files.get('method-memory.json'), saved);
+  });
+}
+
+test('插件在发现来源期间卸载，迟到的清单不会建任务或请求审核', async () => {
+  const h = setup(), entered = Promise.withResolvers(), list = Promise.withResolvers();
+  let lists = 0, writes = 0;
+  h.dependencies.browser = () => ({
+    async list() {
+      lists++;
+      entered.resolve();
+      return list.promise;
+    },
+  });
+  const tick = h.model.tick();
+  await entered.promise;
+  h.core.disposed = true;
+  h.core.write = () => { writes++; };
+  list.resolve([h.state.episode]);
+  await tick;
+  assert.equal(lists, 1);
+  assert.equal(writes, 0);
+  assert.deepEqual(h.model.data.jobs, {});
+  assert.deepEqual(h.calls, []);
+});
+
+test('采用方法时原证据仍在读取，插件卸载后不给当前回合保存选择', async () => {
+  const h = setup();
+  await h.model.tick();
+  const entered = Promise.withResolvers(), read = Promise.withResolvers();
+  const { version } = h.model.data.jobs[id];
+  h.dependencies.browser = () => ({
+    async read() { entered.resolve(); return read.promise; },
+  });
+  const choose = h.model.decide(role, 'outstanding-run', id, version, 'use', '适合本次任务');
+  await entered.promise;
+  h.core.disposed = true;
+  read.resolve(h.state.episode);
+  await assert.rejects(choose, /无法核对/);
+  assert.deepEqual(h.model.data.decisions, []);
+  assert.deepEqual(h.files.get('method-memory.json').decisions, []);
+});
