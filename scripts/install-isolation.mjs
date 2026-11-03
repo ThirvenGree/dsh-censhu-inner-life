@@ -106,6 +106,7 @@ for(const [rel,replacements] of specs){const file=path.join(profile,'node_module
    change('scheduleIdleReview(turn) {','scheduleIdleReview(turn) {\n        if(requiresReviewedCapture(this.agent)){this.cancelIdleReview(true);return;}');
    change('guidedReminder(this.config, this.memoryTurn','guidedReminder(requiresReviewedCapture(this.agent)?{...this.config,writeEnabled:false}:this.config, this.memoryTurn');
    const api=pathToFileURL(path.join(profile,'node_modules/dsh-cen-shu-life/lib/reviewed-write.js')).href;
+   if(typeof (await import(api)).isAuditedWrite!=='function')throw Error('请先安装带审核写入许可的岑舒生活 1.32.0 或兼容版本');
    if(!source.includes('import {isAuditedWrite}'))source='import {isAuditedWrite} from '+JSON.stringify(api)+';\n'+source;
    change('composableTurn(exec);\n\t\t\tconst request = {\n\t\t\t\taction: args.action','if(!isAuditedWrite(exec))composableTurn(exec);\n\t\t\tconst request = {\n\t\t\t\taction: args.action');
    const marker='name: "mnemon_runtime_memory",';const pos=source.indexOf(marker),anchor='ctx.tools.register(definition({';const insert=source.lastIndexOf(anchor,pos);
