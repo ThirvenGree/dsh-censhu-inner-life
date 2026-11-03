@@ -16,3 +16,12 @@ test('two providers must both withdraw a shared source before it becomes dispute
  markDependencies([part],[receipt]);assert.equal(row.needsEvidenceReview,undefined);
  markDependencies([part],[receipt,{...receipt,backend:'engram'}]);assert.equal(row.needsEvidenceReview,true);
 });
+test('same-provider copies and revisions are independent',()=>{
+ const text='记得的内容',h=evidenceHash(text);
+ const records=['A','B'].map(id=>({provider:'openviking',scope:'user',id,version:'v1',versionKind:'native',contentHash:h}));
+ const row={id:'derived',evidence:[{text,sources:['memory:openviking'],records}]},part={record:{items:[row]},save(){}};
+ const r={phase:'done',scoped:true,backend:'openviking',scope:'user',recordId:'A',revokedHash:h,version:'v1'};
+ markDependencies([part],[r]);assert.ok(!row.needsEvidenceReview);assert.ok(records[0].withdrawnAt);assert.ok(!records[1].withdrawnAt);
+ markDependencies([part],[r,{...r,recordId:'B',version:'v0'}]);assert.ok(!row.needsEvidenceReview);
+ markDependencies([part],[r,{...r,recordId:'B'}]);assert.ok(row.needsEvidenceReview);
+});
