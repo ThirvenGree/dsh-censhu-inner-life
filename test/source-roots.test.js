@@ -25,3 +25,9 @@ test('same-provider copies and revisions are independent',()=>{
  markDependencies([part],[r,{...r,recordId:'B',version:'v0'}]);assert.ok(!row.needsEvidenceReview);
  markDependencies([part],[r,{...r,recordId:'B'}]);assert.ok(row.needsEvidenceReview);
 });
+
+test('an unidentified old citation cannot be attributed to a deleted URI by its wording alone',()=>{
+ const item={id:'old',evidence:[{text:'shared',source:'memory:openviking'}]};
+ markDependencies([{record:{items:[item]},save(){}}],[{phase:'done',scoped:true,backend:'openviking',scope:'user',recordId:'A',revokedHash:evidenceHash('shared')}]);
+ assert.ok(!item.needsEvidenceReview);
+});
