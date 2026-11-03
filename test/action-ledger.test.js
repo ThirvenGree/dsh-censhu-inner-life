@@ -21,3 +21,32 @@ test('completed and interrupted actions stay blocked after disk reload; distinct
 test('corrupt or unwritable ledger fails before dispatch instead of silently forgetting actions',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'inner-ledger-'));try{const ledger=new ActionLedger(dir,'run');fs.writeFileSync(ledger.file,'broken');assert.throws(()=>ledger.claim({name:'write',arguments:{},callId:'x'}));}finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('agency life-turn hooks protect dispatch, late calls, restart and task boundaries',async()=>{
+ const {lifeActionGate}=await import('../lib/action-ledger.js');
+ const {DisplaySession}=await import('../lib/display-session.js');
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'agency-live-gate-'));
+ try{
+  fs.writeFileSync(path.join(dir,'display-session.json'),JSON.stringify({sessionId:'life'}));
+  let gate,post,tracking=false;
+  const ctx={effect:f=>f(),on:()=>()=>{},tools:{guard(fn){gate=fn;return ()=>{gate=null;};}}};
+  const agent={session:{id:'life'},ctx:{on(event,fn){assert.equal(event,'tools/post-execute');post=fn;return ()=>{post=null;};}}};
+  const build=()=>lifeActionGate(ctx,dir,new DisplaySession(ctx,dir),()=>'life');
+  const call=(name,args,id)=>({name,arguments:args,callId:id,agent});
+  const write=call('write',{text:'once',file:'out'},'one'),image=call('image_generate',{prompt:'ticket'},'two'),code=call('run_code',{code:'externalAction()'},'three');
+  let service=build(),release=service.claim(agent,'opportunity-A',()=>tracking,()=>{});
+  assert.equal(typeof gate(write),'string');assert.equal(gate({...write,agent:{id:'qq'}}),undefined);
+  tracking=true;
+  if(!gate(write))fs.appendFileSync(path.join(dir,'out'),'once');
+  assert.deepEqual(await post(write,{isError:false},async()=>({kind:'accept'})),{kind:'accept'});
+  assert.match(gate({...write,arguments:{file:'out',text:'once'},callId:'retry'}),/completed/);
+  assert.equal(gate(image),undefined); // crash after dispatch, without a result
+  assert.equal(gate(code),undefined);await post(code,{isError:false},async()=>({kind:'block'}));
+  for(let n=0;n<2;n++)assert.equal(gate(call('censhu_agency_event_history',{eventId:'ticket'},String(n))),undefined);
+  release();assert.equal(post,null);assert.equal(typeof gate(write),'string');service.dispose();
+  service=build();assert.equal(typeof gate(write),'string');release=service.claim(agent,'opportunity-A',()=>true,()=>{});
+  assert.match(gate({...image,callId:'again'}),/pending/);assert.match(gate({...code,callId:'again'}),/uncertain/);
+  assert.match(gate({...write,callId:'again'}),/completed/);assert.equal(fs.readFileSync(path.join(dir,'out'),'utf8'),'once');
+  release();release=service.claim(agent,'opportunity-B',()=>true,()=>{});assert.equal(gate(write),undefined);release();service.dispose();
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
