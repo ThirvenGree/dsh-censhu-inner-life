@@ -53,3 +53,11 @@ test('personal turn keeps its agency decisions with general tools off; internal 
  assert.equal(guard({agent,name:'censhu_agency_diary'}),undefined);assert.equal(guard({agent,name:'censhu_agency_contact'}),undefined);assert.equal(guard({agent,name:'exec'}),PRIVATE_TOOL_DENIAL);off();
  }finally{if(prev===undefined)delete process.env.DSH_HOME;else process.env.DSH_HOME=prev;fs.rmSync(h,{recursive:true,force:true});}
 });
+
+test('only the bound QQ session bypasses unsupervised memory capture',async()=>{
+ const {requiresReviewedCapture}=await import('../lib/isolation.js');
+ const prev=process.env.DSH_HOME,home=fs.mkdtempSync(path.join(os.tmpdir(),'qq-capture-'));process.env.DSH_HOME=home;
+ try{const dir=path.join(home,'characters/censhu');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,'integration.json'),JSON.stringify({sessionId:'session-qq'}));
+ assert.equal(requiresReviewedCapture({session:{id:'qq'}}),true);assert.equal(requiresReviewedCapture('session-other'),false);
+ }finally{if(prev===undefined)delete process.env.DSH_HOME;else process.env.DSH_HOME=prev;fs.rmSync(home,{recursive:true,force:true});}
+});

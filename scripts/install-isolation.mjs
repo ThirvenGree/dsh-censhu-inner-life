@@ -2,6 +2,7 @@ import fs from 'node:fs';import os from 'node:os';import path from 'node:path';i
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),home=process.env.DSH_HOME||path.join(os.homedir(),'.dsh'),profile=path.resolve(process.argv[2]||path.join(home,'profiles/desktop'));
 const url=pathToFileURL(path.join(root,'lib/isolation.js')).href;
 const specs=[
+  ["dsh-memory-evolve/lib/index.js",[["async execute(args, exec) {\n      const target = args.target","async execute(args, exec) {\n      if(isProbeWorkspace(exec?.agent?.session?.header?.cwd || exec?.agent?.session?.cwd)) return {ok:false,message:'测试工作区不使用正式记忆工具'};\n      const target = args.target"]]],
   [
     "@openviking/dsh-memory-plugin/index.mjs",
     [
@@ -91,9 +92,24 @@ const specs=[
 ];
 const manifest={version:1,protocol:'censhu-private-session-v1',at:Date.now(),files:[]};const plans=[];
 for(const [rel,replacements] of specs){const file=path.join(profile,'node_modules',rel);if(!fs.existsSync(file))continue;let source=fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n');
- {for(const [from,to] of replacements){if(source.includes(to))continue;if(!source.includes(from))throw Error('隔离适配不兼容，未写入：'+rel+' / '+from.slice(0,70));source=source.replace(from,to);}if(!source.includes('// censhu-private-session-v1'))source="// censhu-private-session-v1\nimport {isPrivateSession,isInternalMessage} from "+JSON.stringify(url)+";\n"+source;}
+ {for(const [from,to] of replacements){if(source.includes(to))continue;if(!source.includes(from))throw Error('隔离适配不兼容，未写入：'+rel+' / '+from.slice(0,70));source=source.replace(from,to);}if(!source.includes('// censhu-private-session-v1'))source="// censhu-private-session-v1\nimport {isPrivateSession,isInternalMessage,isProbeWorkspace} from "+JSON.stringify(url)+";\n"+source;}
  // Filter historical synthetic user messages in Engram as well as isolating worker sessions.
  if(rel.startsWith('@kenz1117/')&&!source.includes('|| isInternalMessage(message)'))source=source.replaceAll('message.source?.kind.startsWith("plugin")','(message.source?.kind.startsWith("plugin") || isInternalMessage(message))');
+ const capturePoints={
+   '@kenz1117/dsh-engram/lib/index.js':[['if (isPrivateSession(deps.sessionId)) return;', 'deps.sessionId','return;']],
+   '@openviking/dsh-memory-plugin/index.mjs':[['if (skipMemory(session)) return;','session','return;']],
+   '@furongjun1999/dsh-memory/lib/hooks.js':[['if (isPrivateSession(session)) return true;','session','return true;']],
+   'dsh-mnemon/lib/index.js':[['if (isPrivateSession(agent)) return;', 'agent','return;']],
+   'dsh-memory-evolve/lib/advisor/index.js':[['if (isPrivateSession(sessionId)) return;','sessionId','return;'],['if (isPrivateSession(session)) return;','session','return;'],['if (isPrivateSession(agent)) return;','agent','return;']]
+ };
+ if(capturePoints[rel]){
+   if(!source.includes('import {requiresReviewedCapture}'))source='import {requiresReviewedCapture} from '+JSON.stringify(url)+';\n'+source;
+   for(const [anchor,value,exit] of capturePoints[rel]){
+     const guarded=anchor+'\n    if (requiresReviewedCapture('+value+')) '+exit;
+     if(!source.includes(anchor))throw Error('自动记忆采集入口未找到：'+rel);
+     source=source.split(guarded).join(anchor).split(anchor).join(guarded);
+   }
+ }
  plans.push({file,source});manifest.files.push({file,hash:createHash('sha256').update(source).digest('hex')});
 }
 const coordinator=path.join(profile,'node_modules/dsh-cen-shu-life/lib/adapter-coordination.js');
