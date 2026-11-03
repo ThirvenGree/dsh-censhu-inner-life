@@ -8,3 +8,11 @@ test('a correction invalidates indirect citations without discrediting an unrela
  markDependencies([part],[receipt]);markDependencies([part],[receipt]);
  assert.equal(trait.needsEvidenceReview,true);assert.equal(thought.needsEvidenceReview,true);assert.equal(other.needsEvidenceReview,undefined);assert.equal(saves,1);
 });
+
+test('two providers must both withdraw a shared source before it becomes disputed',()=>{
+ const row={id:'trait',evidence:[{text:'shared',sources:['memory:openviking','memory:engram_search']}]};
+ const part={record:{items:[row]},save(){}};
+ const receipt={phase:'done',scoped:true,revokedHash:evidenceHash('shared'),backend:'openviking'};
+ markDependencies([part],[receipt]);assert.equal(row.needsEvidenceReview,undefined);
+ markDependencies([part],[receipt,{...receipt,backend:'engram'}]);assert.equal(row.needsEvidenceReview,true);
+});
