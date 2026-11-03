@@ -1,0 +1,29 @@
+--- a/src/bridge.js
++++ b/src/bridge.js
+@@ -5986,8 +5986,16 @@
+             if (!image.ok) throw new Error(image.error || '图片预览失败');
+             const captureId = crypto.randomUUID();
++            // Preserve the original independently of the short-lived send permission.
++            const artifactDir=path.join(STATE_DIR,'generated-images');
++            await fs.promises.mkdir(artifactDir,{recursive:true});
++            const artifactFile=path.join(artifactDir,captureId+'.image');
++            const expectedHash=crypto.createHash('sha256').update(generated.buffer).digest('hex');
++            await fs.promises.writeFile(artifactFile,generated.buffer,{flag:'wx',mode:0o600});
++            const saved=await fs.promises.readFile(artifactFile);
++            if(crypto.createHash('sha256').update(saved).digest('hex')!==expectedHash)throw Error('生成图原件校验失败');
+             browserCaptures.set(captureId, { key, buffer: generated.buffer, mimeType: generated.mimeType, source: 'generated', createdAt: Date.now(),eventId });
+             if(eventId)await qzoneLifeRequest('/drawing/result',{eventId,sessionId:state.sessions[key],status:'prepared',captureId});
+             setTimeout(() => browserCaptures.delete(captureId), 5 * 60 * 1000).unref();
+-            sendJson({ ok: true, captureId, model: generated.model, expiresInSeconds: 300, image: { mimeType: image.mimeType, data: image.buffer.toString('base64') } });
++            sendJson({ ok: true, captureId, artifactHash:expectedHash, model: generated.model, expiresInSeconds: 300, image: { mimeType: image.mimeType, data: image.buffer.toString('base64') } });
+           } catch (error) { if(drawingBegan)try{await qzoneLifeRequest('/drawing/result',{eventId,sessionId:state.sessions[key],status:'failed',error:error.message});}catch{} sendJson({ ok: false, error: error?.message || '生成失败' }, 502); }
+           return;
+--- a/src/mcp-snowluma-safe.js
++++ b/src/mcp-snowluma-safe.js
+@@ -1172,5 +1172,5 @@
+         const data = await agentApi('/api/socialV2/generate-image', { method: 'POST', headers: { 'x-agent-token': token }, body: JSON.stringify({ key, prompt, aspectRatio,eventId }), timeoutMs: 200000 });
+         if (!data?.ok || !data.image?.data) throw new Error(data?.error || '未返回图片');
+-        return { content: [{ type: 'text', text: `图片已生成，尚未发送。captureId=${data.captureId}，5 分钟内有效；先查看下面图像，再按本次用户要求或本会话已有的自主分享授权决定是否发送。` }, { type: 'image', mimeType: data.image.mimeType, data: data.image.data }] };
++        return { content: [{ type: 'text', text: `图片已生成，尚未发送。artifactHash=${data.artifactHash}；captureId=${data.captureId}，5 分钟内有效；先查看下面图像，再按本次用户要求或本会话已有的自主分享授权决定是否发送。` }, { type: 'image', mimeType: data.image.mimeType, data: data.image.data }] };
+       } catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }
+     });
