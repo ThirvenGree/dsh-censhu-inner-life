@@ -22,6 +22,30 @@ test('corrupt or unwritable ledger fails before dispatch instead of silently for
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'inner-ledger-'));try{const ledger=new ActionLedger(dir,'run');fs.writeFileSync(ledger.file,'broken');assert.throws(()=>ledger.claim({name:'write',arguments:{},callId:'x'}));}finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 
+test('context and memory reads remain repeatable after failure without persistent action claims; edits stay protected',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'inner-read-ledger-'));
+ try{
+  const ledger=new ActionLedger(dir,'reading');
+  for(const [name,args] of [
+   ['censhu_context_recall',{action:'catalog'}],['censhu_context_recall',{action:'read',offset:0}],
+   ['censhu_question_recall',{question:'一件旧事'}],['censhu_life_context',{}],['censhu_read_memory',{backend:'openviking'}],
+   ['censhu_agency_method',{action:'recall'}],['censhu_agency_method','{"action":"recall"}'],
+   ['censhu_agency_note','{"action":"read"}'],['censhu_private_archive',{action:'compare'}],
+  ]){
+   const exec={name,arguments:args,callId:'read'};
+   assert.equal(ledger.claim(exec),undefined);ledger.settle(exec,{isError:true});
+   assert.equal(ledger.claim({...exec,callId:'retry'}),undefined);
+  }
+  assert.equal(fs.existsSync(ledger.file),false,'pure reads must not create action-ledger state');
+  for(const [name,args] of [['censhu_agency_method',{action:'choose'}],['censhu_agency_note',{action:'keep'}],['censhu_private_archive',{action:'save'}],['censhu_correct_memory',{action:'replace'}]]){
+   const exec={name,arguments:args,callId:'write'};
+   assert.equal(ledger.claim(exec),undefined);ledger.settle(exec,{isError:true});
+   assert.match(ledger.claim({...exec,callId:'retry'}),/uncertain/);
+  }
+  assert.equal(ledger.view().length,4);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
 test('agency life-turn hooks protect dispatch, late calls, restart and task boundaries',async()=>{
  const {lifeActionGate}=await import('../lib/action-ledger.js');
  const {DisplaySession}=await import('../lib/display-session.js');

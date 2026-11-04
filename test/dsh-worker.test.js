@@ -11,6 +11,10 @@ for(const autonomousTools of [false,true])test('native session reuse and tool po
    let dispatched=false;
    const gate=await scoped.get('tools/pre-execute')({name,arguments:{iteration:requests},callId:name+requests,agent:this},async()=>{dispatched=true;return {kind:'allow'};});
    assert.equal(gate.kind,autonomousTools?'allow':'deny');assert.equal(dispatched,autonomousTools);if(!autonomousTools)assert.match(gate.reason,/独处会话禁止/);
+ }for(const name of ['censhu_context_recall','censhu_question_recall']){
+   let dispatched=false;const exec={name,arguments:{action:'read'},callId:name+requests,agent:this};
+   const gate=await scoped.get('tools/pre-execute')(exec,async()=>{dispatched=true;return {kind:'allow'};});
+   assert.equal(gate.kind,'allow');assert.equal(dispatched,true);
  }for(const listener of listeners){if(requests===1)listener({id:this.id},{type:'request/header'});listener({id:this.id},{type:'assistant/message',data:{message:{content:[{type:'text',text:'{"feeling":"平常"}'}]}}});}this.status='idle';}};
  const controller={async create({sessionId}){assert.equal(isPrivateSession(sessionId),true);created++;worker.id=sessionId;return {sessionId};},async resolveAgent(){return {agent:worker};}};
  const ctx={tools:{guard:()=>()=>{}},agents:{roots:()=>[source,worker]},get:name=>name==='sessionController'?controller:undefined,on:(_name,fn)=>{listeners.add(fn);return ()=>listeners.delete(fn);}};

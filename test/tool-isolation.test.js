@@ -30,6 +30,11 @@ test('private tools cannot dispatch even after another listener allows; ordinary
     assert.equal(guard({agent:ordinaryAgent}),undefined);
     assert.equal(guard({}),undefined); // host-side reviewed submissions have no private agent
     assert.equal(guard({agent:privateAgent}),PRIVATE_TOOL_DENIAL); // no active-turn condition
+    for(const name of ['censhu_context_recall','censhu_question_recall']){
+      const exec={agent:privateAgent,name,arguments:{action:'read'}};
+      assert.equal((await gate(exec,()=>({kind:'allow'}))).kind,'allow');
+      assert.equal(guard(exec),undefined,'read-only context tools must reach their own scope validation');
+    }
     stop();assert.equal(disposed,2);
   } finally {
     if(home===undefined)delete process.env.DSH_HOME;else process.env.DSH_HOME=home;
@@ -50,7 +55,7 @@ test('personal turn keeps its agency decisions with general tools off; internal 
  try{registerPrivateSession('life-test');let guard;
  const ctx={on:()=>()=>{},tools:{guard:fn=>{guard=fn;return ()=>{};}}};
  const off=installToolIsolation(ctx,()=>false,()=> 'life-test');const agent={session:{id:'life-test'}};
- assert.equal(guard({agent,name:'censhu_agency_diary'}),undefined);assert.equal(guard({agent,name:'censhu_agency_contact'}),undefined);assert.equal(guard({agent,name:'exec'}),PRIVATE_TOOL_DENIAL);off();
+ assert.equal(guard({agent,name:'censhu_agency_diary'}),undefined);assert.equal(guard({agent,name:'censhu_agency_contact'}),undefined);assert.equal(guard({agent,name:'censhu_context_recall'}),undefined);assert.equal(guard({agent,name:'exec'}),PRIVATE_TOOL_DENIAL);off();
  }finally{if(prev===undefined)delete process.env.DSH_HOME;else process.env.DSH_HOME=prev;fs.rmSync(h,{recursive:true,force:true});}
 });
 

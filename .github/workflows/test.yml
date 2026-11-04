@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ThirvenGree/dsh-cen-shu-life
-          ref: caede2af8714191d21cc2d34843625b8a7623c95
+          ref: 9b88a3e1951a3d2cd9becb88d53c283dcc3dd254
           path: dsh-cen-shu-life
       - uses: actions/setup-node@v4
         with:
