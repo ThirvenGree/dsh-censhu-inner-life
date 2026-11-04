@@ -1,6 +1,8 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {ActionLedger} from '../lib/action-ledger.js';
 import {spawnSync} from 'node:child_process';
+import {pathToFileURL} from 'node:url';
+const {isReadOnlyTool}=await import(process.env.LIFE_PLUGIN_ROOT?pathToFileURL(path.resolve(process.env.LIFE_PLUGIN_ROOT,'lib/tool-semantics.js')):new URL('../../dsh-cen-shu-life/lib/tool-semantics.js',import.meta.url));
 test('a fresh Node process cannot repeat a completed external action or a crash-uncertain action',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'inner-process-'));
  try{
@@ -11,8 +13,8 @@ test('a fresh Node process cannot repeat a completed external action or a crash-
 });
 test('completed and interrupted actions stay blocked after disk reload; distinct tasks remain independent',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'inner-ledger-'));
- try{let ledger=new ActionLedger(dir,'run1');const exec={name:'image_generate',arguments:{prompt:'窗台',size:512},callId:'first'};
- assert.equal(ledger.claim(exec),undefined);ledger.settle(exec,{isError:false});ledger=new ActionLedger(dir,'run1');assert.match(ledger.claim({...exec,callId:'new',arguments:{size:512,prompt:'窗台'}}),/completed/);
+ try{let ledger=new ActionLedger(dir,'run1',isReadOnlyTool);const exec={name:'image_generate',arguments:{prompt:'窗台',size:512},callId:'first'};
+ assert.equal(ledger.claim(exec),undefined);ledger.settle(exec,{isError:false});ledger=new ActionLedger(dir,'run1',isReadOnlyTool);assert.match(ledger.claim({...exec,callId:'new',arguments:{size:512,prompt:'窗台'}}),/completed/);
  const uncertain={name:'qq_send_message',arguments:{text:'你好'},callId:'send'};assert.equal(ledger.claim(uncertain),undefined);assert.match(new ActionLedger(dir,'run1').claim({...uncertain,callId:'retry'}),/pending/);
  assert.equal(new ActionLedger(dir,'run2').claim(exec),undefined);
  const read={name:'read_image',arguments:{file_path:'picture.png'}};assert.equal(ledger.claim(read),undefined);assert.equal(ledger.claim(read),undefined);
@@ -25,7 +27,7 @@ test('corrupt or unwritable ledger fails before dispatch instead of silently for
 test('context and memory reads remain repeatable after failure without persistent action claims; edits stay protected',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'inner-read-ledger-'));
  try{
-  const ledger=new ActionLedger(dir,'reading');
+  const ledger=new ActionLedger(dir,'reading',isReadOnlyTool);
   for(const [name,args] of [
    ['censhu_context_recall',{action:'catalog'}],['censhu_context_recall',{action:'read',offset:0}],
    ['censhu_question_recall',{question:'一件旧事'}],['censhu_life_context',{}],['censhu_read_memory',{backend:'openviking'}],
@@ -53,7 +55,7 @@ test('agency life-turn hooks protect dispatch, late calls, restart and task boun
  try{
   fs.writeFileSync(path.join(dir,'display-session.json'),JSON.stringify({sessionId:'life'}));
   let gate,post,tracking=false;
-  const ctx={effect:f=>f(),on:()=>()=>{},tools:{guard(fn){gate=fn;return ()=>{gate=null;};}}};
+  const ctx={cenShuLifeShared:{isReadOnlyTool},effect:f=>f(),on:()=>()=>{},tools:{guard(fn){gate=fn;return ()=>{gate=null;};}}};
   const agent={session:{id:'life'},ctx:{on(event,fn){assert.equal(event,'tools/post-execute');post=fn;return ()=>{post=null;};}}};
   const build=()=>lifeActionGate(ctx,dir,new DisplaySession(ctx,dir),()=>'life');
   const call=(name,args,id)=>({name,arguments:args,callId:id,agent});
@@ -67,10 +69,25 @@ test('agency life-turn hooks protect dispatch, late calls, restart and task boun
   assert.equal(gate(image),undefined); // crash after dispatch, without a result
   assert.equal(gate(code),undefined);await post(code,{isError:false},async()=>({kind:'block'}));
   for(let n=0;n<2;n++)assert.equal(gate(call('censhu_agency_event_history',{eventId:'ticket'},String(n))),undefined);
+  // The installed gate reads the shared service on each dispatch, so a new
+  // shared read operation needs no matching edit in the inner plugin.
+  ctx.cenShuLifeShared={isReadOnlyTool:exec=>exec.name==='future_shared_read'||isReadOnlyTool(exec)};
+  for(let n=0;n<2;n++)assert.equal(gate(call('future_shared_read',{},String(n))),undefined);
   release();assert.equal(post,null);assert.equal(typeof gate(write),'string');service.dispose();
   service=build();assert.equal(typeof gate(write),'string');release=service.claim(agent,'opportunity-A',()=>true,()=>{});
   assert.match(gate({...image,callId:'again'}),/pending/);assert.match(gate({...code,callId:'again'}),/uncertain/);
   assert.match(gate({...write,callId:'again'}),/completed/);assert.equal(fs.readFileSync(path.join(dir,'out'),'utf8'),'once');
   release();release=service.claim(agent,'opportunity-B',()=>true,()=>{});assert.equal(gate(write),undefined);release();service.dispose();
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('missing, failed and invalid shared policies conservatively track an operation',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'inner-read-policy-failure-'));
+ try{
+  for(const [index,policy] of [undefined,()=>{throw Error('service unavailable');},()=>Promise.resolve(true),()=>1].entries()){
+   const ledger=new ActionLedger(dir,'missing-'+index,policy),exec={name:'censhu_context_recall',arguments:{action:'catalog'},callId:'read'};
+   assert.equal(ledger.claim(exec),undefined);ledger.settle(exec,{isError:true});
+   assert.match(ledger.claim({...exec,callId:'retry'}),/uncertain/);
+  }
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });

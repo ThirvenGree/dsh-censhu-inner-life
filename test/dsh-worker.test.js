@@ -3,8 +3,10 @@ const originalHome=process.env.DSH_HOME,testHome=fs.mkdtempSync(path.join(os.tmp
 process.on('exit',()=>{if(originalHome)process.env.DSH_HOME=originalHome;else delete process.env.DSH_HOME;fs.rmSync(testHome,{recursive:true,force:true});});
 import test from 'node:test';import assert from 'node:assert/strict';import {isPrivateSession} from '../lib/isolation.js';
 import {DshWorker} from '../lib/dsh-worker.js';
+import {pathToFileURL} from 'node:url';
+const {isReadOnlyTool}=await import(process.env.LIFE_PLUGIN_ROOT?pathToFileURL(path.resolve(process.env.LIFE_PLUGIN_ROOT,'lib/tool-semantics.js')):new URL('../../dsh-cen-shu-life/lib/tool-semantics.js',import.meta.url));
 for(const autonomousTools of [false,true])test('native session reuse and tool policy '+autonomousTools,async()=>{
- const listeners=new Set(),scoped=new Map();let requests=0,created=0;
+ const listeners=new Set(),scoped=new Map();let requests=0,created=0,ledgerGuard;
  const source={id:'session-main',status:'idle',session:{id:'session-main',meta:{cwd:'test'},requestHeader:()=>({config:{provider:'deepseek-account',model:'deepseek-flash'}})}};
  const worker={id:'session-inner',status:'idle',ctx:{on:(name,fn)=>{const prior=scoped.get(name);scoped.set(name,prior&&name==='tools/pre-execute'?(exec,next)=>prior(exec,()=>fn(exec,next)):fn);return ()=>scoped.delete(name);}},followup(){this.status='running';},async whenIdle(){requests++;const request=await scoped.get('agent/request')({},async()=>({provider:'old',model:'old',reasoningEffort:'unsupported'}));assert.equal(request.model,'deepseek-flash');assert.equal(request.reasoningEffort,undefined);let continued=0;const downstream={sections:[{name:'cosplay',text:'persona'}],contexts:[{name:'memory',text:'recalled'}],tools:[{name:'qq_send_message'}],variables:{user:'test'}};const assembly=await scoped.get('system-prompt/assemble')({sections:[],contexts:[],tools:[]},{scope:'test'},async()=>{continued++;await Promise.resolve();return downstream;});assert.equal(continued,1);assert.equal(assembly.sections[0].name,'cosplay');assert.equal(assembly.contexts[0].name,'memory');assert.equal(assembly.sections.at(-1).name,'censhu-inner-life-purpose');assert.equal(assembly.contexts.at(-1).name,'censhu-inner-life-observations');assert.equal(assembly.variables,downstream.variables);assert.equal(assembly.tools.length,1); // DSH may advertise tools regardless of assembly edits.
  for(const name of ['memory_write','write','exec','qq_send_message','mcp__remote__action']) {
@@ -14,11 +16,11 @@ for(const autonomousTools of [false,true])test('native session reuse and tool po
  }for(const name of ['censhu_context_recall','censhu_question_recall']){
    let dispatched=false;const exec={name,arguments:{action:'read'},callId:name+requests,agent:this};
    const gate=await scoped.get('tools/pre-execute')(exec,async()=>{dispatched=true;return {kind:'allow'};});
-   assert.equal(gate.kind,'allow');assert.equal(dispatched,true);
+   assert.equal(gate.kind,'allow');assert.equal(dispatched,true);assert.equal(ledgerGuard(exec),undefined);assert.equal(ledgerGuard({...exec,callId:exec.callId+'-retry'}),undefined);
  }for(const listener of listeners){if(requests===1)listener({id:this.id},{type:'request/header'});listener({id:this.id},{type:'assistant/message',data:{message:{content:[{type:'text',text:'{"feeling":"平常"}'}]}}});}this.status='idle';}};
  const controller={async create({sessionId}){assert.equal(isPrivateSession(sessionId),true);created++;worker.id=sessionId;return {sessionId};},async resolveAgent(){return {agent:worker};}};
- const ctx={tools:{guard:()=>()=>{}},agents:{roots:()=>[source,worker]},get:name=>name==='sessionController'?controller:undefined,on:(_name,fn)=>{listeners.add(fn);return ()=>listeners.delete(fn);}};
- const core={life:{assembleBudget:async(_agent,next,collect)=>collect(await next()),budgetContext:(base,_agent,field,name,parts)=>({...base,[field]:[...base[field],{name,text:parts.map(p=>p.text).join("\n")}]})},config:{enabled:true,autonomousTools},dir:path.join(testHome,String(autonomousTools)),record:{},now:()=>123,save(){}};const adapter=new DshWorker(ctx,core);
+ const ctx={tools:{guard:fn=>{ledgerGuard=fn;return()=>{ledgerGuard=null;};}},agents:{roots:()=>[source,worker]},get:name=>name==='sessionController'?controller:undefined,on:(_name,fn)=>{listeners.add(fn);return ()=>listeners.delete(fn);}};
+ const core={life:{isReadOnlyTool,assembleBudget:async(_agent,next,collect)=>collect(await next()),budgetContext:(base,_agent,field,name,parts)=>({...base,[field]:[...base[field],{name,text:parts.map(p=>p.text).join("\n")}]})},config:{enabled:true,autonomousTools},dir:path.join(testHome,String(autonomousTools)),record:{},now:()=>123,save(){}};const adapter=new DshWorker(ctx,core);
  for(let i=0;i<2;i++)assert.equal((await adapter.run({runId:'test:resume',sourceId:'session-main',input:{},previous:[]})).feeling,'平常');
  assert.equal(created,1);assert.equal(core.record.worker.turns,2);assert.equal(listeners.size,0);assert.equal(scoped.size,0);
  await adapter.run({runId:'test:new-batch',sourceId:'session-main',input:{},previous:[]});assert.equal(created,2);assert.equal(core.record.worker.runId,'test:new-batch');

@@ -4,10 +4,12 @@ import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import {guardContactMedia,ActionLedger} from '../lib/action-ledger.js';
+import {pathToFileURL} from 'node:url';
+const {isReadOnlyTool}=await import(process.env.LIFE_PLUGIN_ROOT?pathToFileURL(path.resolve(process.env.LIFE_PLUGIN_ROOT,'lib/tool-semantics.js')):new URL('../../dsh-cen-shu-life/lib/tool-semantics.js',import.meta.url));
 test('QQ handoff registers actual image tool, preserves unknown across retry, and unregisters hooks',async t=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'agency-contact-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
- let check,post,authorized=true;
- const ctx={tools:{guard(fn){check=fn;return ()=>{check=null;};}}};
+ let check,post,authorized=true,policyCalls=0;
+ const ctx={cenShuLifeShared:{isReadOnlyTool(exec){policyCalls++;return isReadOnlyTool(exec);}},tools:{guard(fn){check=fn;return ()=>{check=null;};}}};
  const agent={session:{id:'qq'},ctx:{on(name,fn){assert.equal(name,'tools/post-execute');post=fn;return ()=>{post=null;};}}};
  const call={agent,name:'mcp__snowluma__qq_generate_image',callId:'a',arguments:{prompt:'a tree'}};
  const start=()=>guardContactMedia(ctx,dir,agent,'intent',()=>authorized);
@@ -16,4 +18,5 @@ test('QQ handoff registers actual image tool, preserves unknown across retry, an
  assert.equal(new ActionLedger(dir,'contact-media:intent').view()[0].state,'uncertain');
  release();assert.equal(post,null);release=start();
  assert.ok(check({...call,callId:'b'}));authorized=false;assert.ok(check(call));release();
+ assert.equal(policyCalls,3,'contact-media claims and settlement share the same classification service');
 });
