@@ -82,17 +82,24 @@ const specs=[
       [
         "const msg = payload && payload.message ? payload.message : payload",
         "const msg = payload && payload.message ? payload.message : payload\n        if (isInternalMessage(msg)) { lastText = ''; lastSrc = msg.source.kind; return }"
-      ],
-      [
-        "if (!stillBound()) return\n        // 以会话事件",
-        "if (!stillBound() || isInternalMessage({source:{kind:lastSrc}})) return\n        // 以会话事件"
       ]
     ]
   ]
 ];
+function patchMoodTurnGuard(source){
+ const old='if (!stillBound()) return\n        // 以会话事件',guarded='if (!stillBound() || isInternalMessage({source:{kind:lastSrc}})) return\n        // 以会话事件';
+ if(source.includes(guarded))return source;
+ if(source.split(old).length===2)return source.replace(old,guarded);
+ // Mood 0.8.7 logs an unbound callback before returning. Keep that diagnostic
+ // block and place the internal-message guard immediately after it.
+ const modern=/if \(!stillBound\(\)\) \{\n([ \t]+diag\([^\n]+\)\n[ \t]+return\n[ \t]+\})\n(?:[ \t]+if \(isInternalMessage\(\{source:\{kind:lastSrc\}\}\)\) return\n)?([ \t]+\/\/ 以会话事件)/g;
+ const matches=[...source.matchAll(modern)];if(matches.length!==1)throw Error('心情 turn-stopping 隔离入口不兼容，未写入');
+ return source.replace(modern,(_all,body,comment)=>'if (!stillBound()) {\n'+body+'\n        if (isInternalMessage({source:{kind:lastSrc}})) return\n'+comment);
+}
 const manifest={version:1,protocol:'censhu-private-session-v1',at:Date.now(),files:[]};const plans=[];
 for(const [rel,replacements] of specs){const file=path.join(profile,'node_modules',rel);if(!fs.existsSync(file))continue;let source=fs.readFileSync(file,'utf8').replace(/\r\n/g,'\n');
  {for(const [from,to] of replacements){if(source.includes(to))continue;if(!source.includes(from))throw Error('隔离适配不兼容，未写入：'+rel+' / '+from.slice(0,70));source=source.replace(from,to);}if(!source.includes('// censhu-private-session-v1'))source="// censhu-private-session-v1\nimport {isPrivateSession,isInternalMessage,isProbeWorkspace} from "+JSON.stringify(url)+";\n"+source;}
+ if(rel==='dsh-feiyu-mood/lib/index.js')source=patchMoodTurnGuard(source);
  // Filter historical synthetic user messages in Engram as well as isolating worker sessions.
  if(rel.startsWith('@kenz1117/')&&!source.includes('|| isInternalMessage(message)'))source=source.replaceAll('message.source?.kind.startsWith("plugin")','(message.source?.kind.startsWith("plugin") || isInternalMessage(message))');
  // Remove the former whole-session QQ guards without touching private-session isolation.
@@ -102,7 +109,9 @@ for(const [rel,replacements] of specs){const file=path.join(profile,'node_module
  if(rel==='dsh-mnemon/lib/index.js'){
    const change=(old,next)=>{if(source.includes(next))return;if(source.split(old).length!==2)throw Error('mnemon 接口不匹配：'+old);source=source.replace(old,()=>next);};
    change('if (this.config.writeEnabled && this.config.writebackMode === "guided") this.recordTurnMessages','if (!requiresReviewedCapture(this.agent) && this.config.writeEnabled && this.config.writebackMode === "guided") this.recordTurnMessages');
-   change('idleReviewAllowed() {','idleReviewAllowed() {\n        if(requiresReviewedCapture(this.agent))return false;');
+   // Mnemon 0.5.39 adds a reserved slot argument; keep all upstream admission gates.
+   const idleSignature = source.includes('idleReviewAllowed(reserved = false) {') ? 'idleReviewAllowed(reserved = false) {' : 'idleReviewAllowed() {';
+   change(idleSignature,idleSignature+'\n        if(requiresReviewedCapture(this.agent))return false;');
    change('scheduleIdleReview(turn) {','scheduleIdleReview(turn) {\n        if(requiresReviewedCapture(this.agent)){this.cancelIdleReview(true);return;}');
    change('guidedReminder(this.config, this.memoryTurn','guidedReminder(requiresReviewedCapture(this.agent)?{...this.config,writeEnabled:false}:this.config, this.memoryTurn');
    const api=pathToFileURL(path.join(profile,'node_modules/dsh-cen-shu-life/lib/reviewed-write.js')).href;
