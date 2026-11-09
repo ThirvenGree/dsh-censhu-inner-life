@@ -73,14 +73,19 @@ test('prior diary and recalled private memory cannot become evidence of a new me
 test('drawing sharing remains owned by drawing plugin even after reflection offers to share',()=>fixture(async({core,life,rows})=>{
  rows[0].data.templateId='drawing-inspiration';core.reflect=async()=>({...diary,shareDecision:'offer'});await core.tick({force:true});assert.equal(core.record.entries[0].shareState,'private');
 }));
-test('original event is scored at most once and daily absolute budget applies',()=>fixture(async({core,life,rows,advance,now})=>{
+test('original event contributes a new feeling once without a numeric daily budget',()=>fixture(async({core,life,rows,advance,now})=>{
  rows[0].data.moodAdmission='admitted';life.judge=async(_p,_s,input)=>input.candidate?{...audit,newFeeling:true,reflectionEvidence:diary.reflection,distinctReason:'看见票根后的反思带来珍惜，与原本烦闷不同',moodDelta:3,dims:{happy:6,calm:0,sad:0}}:attention;
  await core.tick({force:true});assert.equal(core.record.entries[0].mood.eventId,'book');
  for(const [i,eventId] of ['book','new-book','third-book'].entries()){advance(30*60000);rows.push({sequence:i+2,id:'life:'+(i+2),kind:'event-stage',at:now(),data:{eventId,name:eventId,moodAdmission:'admitted'}});await core.tick({force:true});}
- assert.equal(core.record.entries.filter(x=>x.mood).length,2);assert.equal(core.count().moodUsed,6);assert.equal(core.count().dimsUsed.happy,12);
+ assert.equal(core.record.entries.filter(x=>x.mood&&!x.mood.diary).length,3);assert.equal(core.record.entries.filter(x=>x.mood?.diary).length,1,'the repeated event still reaches the mood once as a diary');assert.equal(core.count().moodUsed,undefined);assert.ok(core.record.entries.filter(x=>x.mood).every(x=>x.mood.qualitative&&!Object.hasOwn(x.mood,'moodDelta')));
 }));
 test('already queued ordinary event cannot score without independent reflection evidence',()=>fixture(async({core,life,rows})=>{
- rows[0].data.moodAccounted=true;life.judge=async(_p,_s,input)=>input.candidate?{...audit,newFeeling:true,moodDelta:3}:attention;await core.tick({force:true});assert.equal(core.record.entries[0].mood,undefined);
+ rows[0].data.moodAccounted=true;life.judge=async(_p,_s,input)=>input.candidate?{...audit,newFeeling:true,moodDelta:3}:attention;await core.tick({force:true});assert.equal(core.record.entries[0].mood.eventId,undefined);assert.equal(core.record.entries[0].mood.diary,true);assert.equal(Object.hasOwn(core.record.entries[0].mood,'moodDelta'),false);
+}));
+test('a reviewed diary reaches the mood once as its own feeling',()=>fixture(async({core,life})=>{
+ const requests=[];life.submitInnerResult=request=>{requests.push(structuredClone(request));return {mood:'queued'};};
+ await core.tick({force:true});const row=core.record.entries[0];assert.deepEqual(row.mood,{qualitative:true,diary:true,feeling:diary.feeling});assert.equal(row.moodAudit.decision,'no-new-feeling');assert.equal(requests.length,1);assert.equal(requests[0].mood.diary,true);
+ await core.applyEffects(row);assert.equal(requests.length,1,'an applied diary is not submitted again');
 }));
 test('own mood receipts and chat-time mood changes are absorbed into baseline without reenqueuing',()=>fixture(async({core,life,rows,now,advance})=>{
  rows.length=0;const status=life.status();let mood=70;life.status=()=>({...status,mood:{ok:true,mood,dims:{happy:0},updatedAt:now(),lastLifeInfluence:{at:now(),ids:['inner:test:reflection']}}});core.ingest();advance(1000);mood=73;core.ingest();assert.equal(core.record.queue.length,0);assert.equal(core.record.moodBaseline.mood,73);
@@ -91,14 +96,14 @@ test('quota-rejected events cannot acquire points through reflection even with a
 }));
 test('latest admission and receipts override stale observation flags before audit',()=>fixture(async({core,life,rows})=>{
  rows[0].data.moodAccounted=true;const status=life.status();life.status=()=>({...status,moodAccounting:{book:{moodAdmission:'admitted',moodReceipts:[{id:'book:start:0',applied:true}]}}});
- life.judge=async(_p,_s,input)=>{if(!input.candidate)return attention;assert.equal(input.observations[0].data.moodReceipts[0].applied,true);return {...audit,newFeeling:true,eventId:'book',reflectionEvidence:diary.reflection,distinctReason:'由反思产生，与原有反应不同',moodDelta:1};};await core.tick({force:true});assert.equal(core.record.entries[0].mood.moodDelta,1);
+ life.judge=async(_p,_s,input)=>{if(!input.candidate)return attention;assert.equal(input.observations[0].data.moodReceipts[0].applied,true);return {...audit,newFeeling:true,eventId:'book',reflectionEvidence:diary.reflection,distinctReason:'由反思产生，与原有反应不同',moodDelta:1};};await core.tick({force:true});assert.equal(core.record.entries[0].mood.qualitative,true);assert.equal(core.record.entries[0].mood.moodDelta,undefined);
 }));
 
 test('only audited intention IDs are enriched with their snapshot versions and submitted',()=>fixture(async({core,life,now})=>{
  const plan={id:'intention:books',generatedAt:now(),revision:3,priority:2};life.snapshot=()=>({context:'',memories:[],lifeIntentions:[plan]});core.reflect=async({input})=>{assert.equal(input.lifeIntentions[0].id,plan.id);return {...diary,intentionChanges:[{id:plan.id,action:'cancel',priority:0,reason:'今晚想早睡'}]};};life.judge=async(_p,_s,input)=>input.candidate?{...audit,approvedIntentionIds:[plan.id]}:attention;let submitted;life.submitInnerResult=request=>{submitted=request;return {memory:'none',mood:'none',intentions:{accepted:[{id:plan.id}],rejected:[]}};};await core.tick({force:true});assert.equal(submitted.intentionChanges[0].expectedRevision,3);assert.equal(submitted.intentionChanges[0].generatedAt,plan.generatedAt);core.record.deliberation.contexts.main={selectedIds:core.record.entries.map(x=>x.id),expiresAt:core.now()+60000};assert.equal(core.context({sessionId:'session-main'}).records[0].source,'character-life');assert.equal(core.record.entries[0].effects.result.intentions.accepted.length,1);
 }));
 test('unapproved or nonexistent intentions do not discard the rest of a valid diary',()=>fixture(async({core,life,now,effects})=>{
- life.snapshot=()=>({context:'',memories:[],lifeIntentions:[{id:'intention:books',generatedAt:now(),revision:0}]});core.reflect=async()=>({...diary,intentionChanges:[{id:'intention:unknown',action:'cancel',priority:0,reason:'想改变'}]});life.judge=async(_p,_s,input)=>input.candidate?{...audit,approvedIntentionIds:['intention:unknown']}:attention;await core.tick({force:true});assert.equal(core.record.entries.length,1);assert.equal(core.record.entries[0].intentionChanges.length,0);assert.equal(core.record.entries[0].intentionChangeErrors.length,1);assert.equal(effects(),0);
+ life.snapshot=()=>({context:'',memories:[],lifeIntentions:[{id:'intention:books',generatedAt:now(),revision:0}]});core.reflect=async()=>({...diary,intentionChanges:[{id:'intention:unknown',action:'cancel',priority:0,reason:'想改变'}]});life.judge=async(_p,_s,input)=>input.candidate?{...audit,approvedIntentionIds:['intention:unknown']}:attention;await core.tick({force:true});assert.equal(core.record.entries.length,1);assert.equal(core.record.entries[0].intentionChanges.length,0);assert.equal(core.record.entries[0].intentionChangeErrors.length,1);assert.equal(effects(),1,'only the reviewed diary reaches the mood');assert.equal(core.record.entries[0].mood.diary,true);
 }));
 
 test('partial effect delivery persists receipt and resumes with the original payload after restart',()=>fixture(async({core,life,options,now})=>{
@@ -162,4 +167,25 @@ test('question research feeds retrieved sources into the actual reflection reque
  const original=life.judge;life.personalitySources=async()=>({memories:[{id:'real',text:'青枔提起旧书'}]});let researchCalls=0,seen;
  life.judge=async(p,s,input,options)=>{if(options?.feature==='inner-question-recall'){researchCalls++;return {decision:'proceed',reason:'回应当前疑问',selectedIds:input.candidates.map(x=>x.id).slice(0,8)};}if(!input.candidate)return {...attention,questions:['这本书对我有什么意义？']};return audit;};
  core.reflect=async request=>{seen=request.input;return diary;};await core.tick({force:true});assert.equal(researchCalls,1);assert.equal(seen.recalledSources[0].id,'memory:real');assert.deepEqual(seen.questions,['这本书对我有什么意义？']);assert.equal(core.record.entries.length,1);assert.equal(core.questionRecall.record.diaries.length,1);
+}));
+
+test('mixed emotions without a numeric change reach awareness once',()=>fixture(async({core,life,rows,now,advance})=>{
+ rows.length=0;const base=life.status();let mixedMood=null;
+ life.status=()=>({...base,mood:{ok:true,mood:70,dims:{happy:0},updatedAt:now(),mixedMood}});
+ core.ingest();advance(1000);mixedMood={label:'开心又担心',summary:'有进展，但还挂念旧书',components:[{id:'w',name:'担心',intensity:20,target:'旧书',cause:'受潮',certainty:'clear'}]};core.ingest();
+ assert.equal(core.record.queue.length,1);assert.equal(core.record.queue[0].data.after.mixedMood.label,'开心又担心');
+ core.record.queue[0].state='done';advance(1000);mixedMood={...mixedMood,at:now(),expiresAt:now()+60000};core.ingest();assert.equal(core.record.queue.length,1);
+ advance(1000);mixedMood=null;core.ingest();assert.equal(core.record.queue.length,2);
+}));
+
+test('wall clock recovery retains action identity and historical diary times, refreshes current context',()=>fixture(async({core,life,advance})=>{
+ core.ingest();const startedAt=core.now();
+ core.record.attempt={id:'same-run',phase:'reflect',startedAt,input:{now:startedAt,weather:{summary:'昨日晴'}},snapshot:{context:'旧状态'}};
+ core.record.actions=[{runId:'same-run',type:'tool/call',callId:'uncertain-image'}];
+ core.record.entries.push({id:'old',expiresAt:startedAt+1000,shareState:'pending'});
+ advance(86400000);life.status=()=>({enabled:true,sessionIds:['session-main'],life:{activity:'今天休息'},weather:{summary:'今日雨'},mood:{ok:false},drawing:{items:[]}});
+ const v=core.recoverRuntime({id:'recovery',pausedAt:startedAt,recoveredAt:core.now()});
+ assert.equal(v.status,'scheduled');assert.equal(core.record.attempt.id,'same-run');assert.equal(core.record.attempt.startedAt,startedAt);
+ assert.equal(core.record.attempt.input.now,core.now());assert.equal(core.record.attempt.input.weather.summary,'今日雨');assert.equal(core.record.attempt.snapshot,undefined);
+ assert.equal(core.record.actions[0].callId,'uncertain-image');assert.equal(core.record.entries[0].shareState,'expired');
 }));

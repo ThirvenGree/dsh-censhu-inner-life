@@ -214,3 +214,71 @@ Gemini 的注意判断现在显式选择 activity=experience/recall/uncertain，
 ### 桌面角色入口
 
 生活插件动态登记的岑舒桌面会话与QQ共享审核记忆、问题回忆、独处感受、性格/兴趣和私人收藏入口。授权直接读取 `cenShuLifeShared.isRoleSession`，不等待后台状态快照刷新。问题回忆的私人原始日记范围仍只在正式生活会话开放。记忆自动采集守卫对所有绑定聊天生效，召回保留，写入/更正经过审核。主动控制仍使用 `primarySessionId`，最近切到桌面聊天不会改变接管者或恢复旧独处定时器。
+
+## 2026-11-06 本机修改：接收心情慢层的累积
+- 内在状态判断的输入 `mood` 增加：
+  - `undertone`：情绪底色与慢慢累积的感受；
+  - `toInnerState`：心情慢层由 Gemini 判断应进入或退出内在状态的累积。
+- 提示里说明：如何体现在 states、conflicts 或 tendency 中，由本次判断决定。
+- 新的交接会改变 revision，所以不必等到原定复看时间就会重新判断（仍受 60 秒间隔和每日次数限制）。
+- 判断成功后，在 `inner-state.json` 的 `moodIntegrated` 里记下已接收的累积 id；退出的项从中移除。
+- 新增测试见 `test/inner-state.test.js`。改前备份为 `.before-accumulation-20261106.bak`。
+
+## 2026-11-07 DSH 0.2.2 工具执行改为批量
+- 私人收藏（`censhu_private_archive`）读图片时要调用 DSH 的 `read_image`。0.2.2 起 `ctx.tools.execute` 改为批量调用，旧写法会失败。
+- 新增 `lib/host-tools.js` 的 `executeHostTool`，同时兼容新旧两版宿主：旧版照常传 `parent` / `rootCallId`；新版作为单次批量调用执行。
+- 测试：`test/host-tools-022.test.js`（2 个）。改前备份：`lib/private-archive.js`、`README.md` 的 `.before-tool-batch-20261107.bak`。
+
+## 2026-11-07：测试会话只读访问记忆
+
+- 测试目录下的会话（`isTestSession`：`runtime-recovery/test-workspace.json` 配置的目录，或系统临时目录下的 `qq-bridge-probe-*` / `qq-bridge-self-test`）可以用工具查记忆和角色状态，但不能写。
+- `lib/tool-isolation.js` 新增 `testSessionWrite`：记忆与角色状态类工具（`censhu_*`、`engram_*`、`mnemon_*`、`mdcg_*`、`mcp__openviking__*`、QQ 轻量记忆、`douyin_remember`、表情包收录与修改等）中，只有登记过的只读工具可以执行；兼有读写的工具只放行读取类 action（例如 `memory` 的 list/expand、`censhu_personality` 的 read）。其余一律拒绝，提示 `TEST_WRITE_DENIAL`。即使开着 `autonomousTools`，这条规则也生效。
+- 浏览器、抖音、B站等平台工具不受影响，仍可在测试会话里测试发送流程。
+- `censhu_question_recall` 现在也允许测试会话调用。它本身是只读查询，但仍会在 `question-recall.json` 里记录每日次数和“最近一次查询”回执，不涉及记忆内容。
+- 测试：`test/tool-isolation.test.js` 新增一条，覆盖写入被拒、读取放行、会话标识记住后仍被拒，以及正式会话照常写入。
+- 需要重启 DSH 生效。备份：`*.before-test-readonly-20261107.bak`。
+
+## 2026-11-08 本机修改：审核通过的日记进入心情
+- 以前只有“对应某个已接纳的生活事件、且和原反应不同”的新感受才进入心情，实际上 13 篇日记一篇都没进。这条路径保留。
+- 现在日记通过审核后，即使没有这种新感受，也会把日记里的感受作为一次心情事件交给生活插件（`row.mood={qualitative:true,diary:true,feeling}`），由 Gemini 判断有没有变化。每篇只算一次。
+- 不进入的情况：只由心情变化引发的日记（防止循环）、回忆旧日记（本批没有新观察）、涉及当天心情额度已满的事件、心情联动关闭、日记已过期。
+- 改动：`lib/core.js`；`test/core.test.js` 新增 1 项，并按新行为更新 3 项。
+- 备份：`.before-diary-mood-20261108.bak`。
+
+## 2026-11-08：上下文段落加名字
+- `lib/core.js` 交给生活插件的三段内容加了名字：`inner:state`、`inner:thoughts`、`inner:interests`。生活插件按名字识别，这三段的优先级由 Gemini 判断。
+- 测试：全量 178 通过，1 项跳过。
+- 备份：`lib/core.js`、`README.md` 的 `.before-context-plan-20261108.bak`。
+- 需要重启 DSH 生效。
+
+## 2026-11-08：只读工具名单加 censhu_current_state
+- `lib/tool-isolation.js` 的只读工具名单加入生活插件新工具 `censhu_current_state`，隔离会话里也能用。
+- 测试：全量 178 通过，1 项跳过。
+- 备份：`lib/tool-isolation.js`、`README.md` 的 `.before-current-state-20261108.bak`。
+
+## 2026-11-09：只读工具名单加 censhu_help
+- `lib/tool-isolation.js` 的只读工具名单加入生活插件新工具 `censhu_help`，隔离会话里也能用。
+- 测试：全量 177 通过，1 项跳过。
+- 备份：`lib/tool-isolation.js`、`README.md` 的 `.before-help-tool-20261109.bak`。
+- 需要重启 DSH 生效。
+
+## 2026-11-09 审查修复
+
+- 日记只保留规定字段，模型多写的 `memory`、`mood`、`id` 等不再生效。
+- 主动进行写的日记（只有想法、没有单独的感受）通过审核后也进入心情。
+- “生活变化记录存在缺口”的提示保留一天后自动清除。
+- 感受只有空格的日记也能存进私人收藏。
+- 测试会话不带 `action` 读取 `censhu_inner_life` 时按读取处理。
+
+## 2026-11-09：性格按描述词核对
+- `lib/personality.js`：定期由 Gemini 把性格条目拆成单个描述词逐个核对，至少两条独立证据直接矛盾才算过时，一次最多改两条；结果仍走原来的 Terra 独立审核和同步。多久再核对由模型决定（7 到 90 天），条目更新不满 7 天不核对。思路借鉴 PHASE-Tree 的 `audit_core_traits`，避免模型被现有文字带着走，总是回答“不用改”。
+- `lib/inner-state.js`：内在状态只把模型明确体现了的心情累积记成已采纳。
+- `lib/thoughts.js`：想法开关关闭时，分享判断也不再读到想法。
+- 备份：相关文件的 `.before-batch-four-20261109.bak`。需要重启 DSH 生效。
+
+## 2026-11-09：休息时段、每日次数交给节奏判断；回忆候选按意思挑
+- **休息时段**：不再固定 02:00–06:00。生活插件的节奏判断（Gemini）按她此刻的活动、疲惫和作息给出 `innerQuietStartHour` / `innerQuietEndHour`，可以跨午夜、带小数，两者相同表示不安排休息。设置里的“休息开始 / 结束”只在没有有效安排时兜底。
+- **每日次数**：注意判断和独处回合的次数也由节奏判断给出（`innerJudgmentsDaily` 0–24、`innerReflectionsDaily` 0–12，0 表示今天不再独处）；设置里的 12 / 6 只在没有有效安排时兜底。`planningContext` 把今天已用的次数交给节奏判断参考，计数变化本身不会触发重新判断。设置页显示当前生效的次数和休息时段。
+- **问题回忆**：候选超过 80 条时，先用生活插件的 `semanticRank`（字面重叠 + 本机 bge-small-zh 向量，按排名融合）排序，再取前 48 条交给模型；换了说法的同一件事不会在模型看到之前被筛掉。向量不可用或首次计算超过 45 秒时退回原来的字面排序。两跳回忆“必须对上线索原文”的过滤不变。
+- 未使用的 `moodDailyLimit`、`dimensionDailyLimit` 两个配置项保留原样（没有代码读取它们）。
+- 测试：`test/gemini-four-1109.test.js`。备份：相关文件的 `.before-gemini-four-20261109.bak`。需要重启 DSH 生效。

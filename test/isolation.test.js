@@ -9,3 +9,12 @@ test('adapter health fails closed on changed source and recovers after manifest 
  try{fs.writeFileSync(file,'original');const manifest={version:1,protocol:'censhu-private-session-v1',files:[{file,hash:hash('original')}]};fs.writeFileSync(path.join(dir,'isolation-adapters.json'),JSON.stringify(manifest));assert.equal(isolationHealth(dir,100000).ready,true);fs.writeFileSync(file,'upgraded');assert.equal(isolationHealth(dir,131000).ready,false);manifest.files[0].hash=hash('upgraded');fs.writeFileSync(path.join(dir,'isolation-adapters.json'),JSON.stringify(manifest));assert.equal(isolationHealth(dir,162000).ready,true);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('configured workspace descendants and persisted id-only lookups stay isolated across module reload',async()=>{
+ const original=process.env.DSH_HOME,home=fs.mkdtempSync(path.join(os.tmpdir(),'test-isolation-'));
+ process.env.DSH_HOME=home;
+ try{fs.mkdirSync(path.join(home,'runtime-recovery'));fs.writeFileSync(path.join(home,'runtime-recovery/test-workspace.json'),JSON.stringify({path:path.join(home,'workspace')}));
+ const id='session-test-persist';assert.equal(isPrivateSession({id,header:{cwd:path.join(home,'workspace/child')}}),true);registerPrivateSession(id);
+ const fresh=await import('../lib/isolation.js?reload='+Date.now());assert.equal(fresh.isPrivateSession(id),true);assert.equal(fresh.isPrivateSession({id:'human',header:{cwd:path.join(home,'workspace-other')}}),false);
+ }finally{if(original)process.env.DSH_HOME=original;else delete process.env.DSH_HOME;fs.rmSync(home,{recursive:true,force:true});}
+});
